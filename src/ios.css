@@ -1,0 +1,1297 @@
+/* iOS surfaces share grouped backgrounds, system tint and control sizes. */
+.plat-ios {
+  --p-canvas: #000;
+  --p-bg: #000;
+  --p-s1: #1c1c1e;
+  --p-s2: #1c1c1e;
+  --p-s3: #2c2c2e;
+  --p-s4: #3a3a3c;
+  --p-on: #f5f5f7;
+  --p-mut: #b9b9bf;
+  --p-dim: #92929a;
+  --p-primary: #64afff;
+  --p-on-primary: #071525;
+  --p-pc: #153653;
+  --p-on-pc: #9ed0ff;
+  --p-sec: #303033;
+  --p-on-sec: #fff;
+  --r-sm: var(--ios-group-radius);
+  --r-md: var(--ios-group-radius);
+  --r-lg: calc(var(--ios-group-radius) + var(--ios-control-gap));
+  --r-ctl: var(--ios-control-radius);
+  --ios-divider: rgba(255, 255, 255, .12);
+  --ios-tab-material: rgba(29, 29, 31, .64);
+  --ios-media-chrome: rgba(20, 20, 23, .56);
+  --ios-media-border: rgba(255, 255, 255, .14);
+  --ios-control-target: 44px;
+  --ios-control-face: 36px;
+  --ios-control-gap: 4px;
+  --ios-compact-inset: calc((var(--ios-control-target) - var(--ios-control-face)) / 2);
+  --ios-segment-face-inset: calc(var(--ios-compact-inset) + var(--ios-control-gap));
+  --ios-control-radius: 4px;
+  --ios-group-radius: calc(var(--ios-control-radius) + var(--ios-control-gap));
+  --ios-top-inset: max(env(safe-area-inset-top, 0px), 8px);
+  --ios-header-side-inset: 16px;
+  --ios-safe-left: max(env(safe-area-inset-left, 0px), var(--ios-native-safe-left, 0px));
+  --ios-safe-right: max(env(safe-area-inset-right, 0px), var(--ios-native-safe-right, 0px));
+  --ios-safe-side: max(var(--ios-safe-left), var(--ios-safe-right));
+  --ios-browse-edge: max(var(--ios-header-side-inset), calc(var(--ios-safe-side) + var(--ios-compact-inset)));
+  --ios-browse-start: var(--ios-browse-edge);
+  --ios-browse-end: var(--ios-browse-edge);
+  --ios-header-start: calc(var(--ios-browse-start) - var(--ios-compact-inset));
+  --ios-header-end: calc(var(--ios-browse-end) - var(--ios-compact-inset));
+  --ios-header-top: calc(var(--sat, 0px) + var(--ios-control-gap));
+  --ios-header-content-top: calc(var(--ios-header-top) + var(--ios-control-target) + 8px);
+  --ios-navigation-bottom: calc(env(safe-area-inset-bottom, 0px) + 2 * var(--ios-control-gap) - var(--ios-compact-inset));
+  --ios-navigation-reserve: calc(var(--ios-navigation-bottom) + var(--ios-control-target) + var(--ios-control-gap));
+  --ios-header-icon-size: 16px;
+  --ios-media-icon-size: 20px;
+  --ios-segment: #2c2c2e;
+  --ios-selected: #636366;
+}
+
+html.theme-light .plat-ios {
+  --p-canvas: #f2f2f7;
+  --p-bg: #f2f2f7;
+  --p-s1: #fff;
+  --p-s2: #fff;
+  --p-s3: #e5e5ea;
+  --p-s4: #e5e5ea;
+  --p-on: #17171a;
+  --p-mut: #505059;
+  --p-dim: #686873;
+  --p-primary: #005ecb;
+  --p-on-primary: #fff;
+  --p-pc: #deedff;
+  --p-on-pc: #00509d;
+  --p-sec: #ededf4;
+  --p-on-sec: #17171a;
+  --ios-divider: rgba(60, 60, 67, .17);
+  --ios-tab-material: rgba(253, 253, 255, .72);
+  --ios-segment: #e5e5ea;
+  --ios-selected: #fff;
+}
+
+.plat-ios .hg-tabbar {
+  bottom: var(--ios-navigation-bottom);
+  pointer-events: auto;
+  inset-inline: var(--ios-browse-start) var(--ios-browse-end);
+  isolation: isolate;
+}
+
+.plat-ios .hg-tabbar::before {
+  content: "";
+  position: absolute;
+  inset: var(--ios-compact-inset) 0;
+  z-index: -1;
+  border-radius: var(--ios-group-radius);
+  background: var(--ios-tab-material);
+  box-shadow: inset 0 0 0 .5px var(--ios-divider);
+  pointer-events: none;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.plat-ios .hg-tabbar > div {
+  height: var(--ios-control-target);
+  padding-inline: var(--ios-control-gap);
+}
+
+.plat-ios .hg-tabbar > div,
+.plat-ios .hg-ios-video-actions,
+.plat-ios .hg-ios-segments {
+  gap: var(--ios-control-gap);
+}
+
+.plat-ios .hg-ios-navigation:not(:has([data-overlay="true"]:not(.hg-ios-floating-bar-over-media))) .hg-tabbar[data-over-video="true"] {
+  --p-primary: #78b9ff;
+  --p-mut: rgba(255, 255, 255, .76);
+  --ios-tab-material: var(--ios-media-chrome);
+  --ios-divider: rgba(255, 255, 255, .12);
+}
+
+.plat-ios :is(.hg-tabbar, .hg-ios-floating-panel .hg-ios-segments) button {
+  gap: var(--ios-control-gap);
+  font-weight: 500;
+}
+
+.plat-ios .hg-tabbar button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.plat-ios .hg-tabbar button {
+  font-size: 12px;
+  color: var(--p-mut);
+  transition: color 150ms ease;
+}
+
+.plat-ios .hg-tabbar button[aria-current="page"] {
+  color: var(--p-primary);
+}
+
+.plat-ios :is(.hg-tabbar, .hg-player-ui) button:focus-visible {
+  outline: 2px solid var(--p-primary);
+  outline-offset: -2px;
+}
+
+.plat-ios .hg-tabbar button span {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.plat-ios .hg-ios-large-title {
+  font-size: 34px;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -.022em;
+}
+
+.plat-ios .hg-ios-back {
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 50%;
+  color: var(--p-primary);
+  background: transparent;
+  box-shadow: none;
+}
+
+.plat-ios .hg-ios-floating-bar {
+  position: absolute;
+  z-index: 10;
+  top: var(--ios-header-top);
+  inset-inline: var(--ios-header-start) var(--ios-header-end);
+  pointer-events: none;
+}
+
+.plat-ios .hg-ios-floating-bar-centered {
+  --ios-header-side-slot: calc(var(--ios-control-target) - var(--ios-compact-inset) + var(--ios-control-gap));
+  display: grid;
+  grid-template-columns: var(--ios-header-side-slot) minmax(0, 1fr) var(--ios-header-side-slot);
+  align-items: center;
+}
+
+.plat-ios .hg-ios-floating-bar-centered .hg-ios-floating-panel {
+  grid-column: 2;
+}
+
+.plat-ios .hg-ios-floating-bar-anchor {
+  position: absolute;
+  inset: 0 0 auto;
+  height: calc(var(--ios-header-top) + var(--ios-control-target));
+  pointer-events: none;
+}
+
+.plat-ios .hg-ios-compact-action {
+  min-inline-size: var(--ios-control-target);
+  justify-content: center;
+}
+
+.plat-ios :is(.hg-ios-floating-bar, .hg-ios-floating-bar-anchor) + .scroll-y {
+  padding-top: var(--ios-header-content-top);
+  padding-bottom: var(--ios-navigation-reserve);
+  scroll-padding-block: var(--ios-header-content-top) var(--ios-navigation-reserve);
+}
+
+.plat-ios .hg-ios-top-bar:has(> [data-overlay="true"]) > [data-overlay="false"] {
+  display: none;
+}
+
+.plat-ios .win-main:has(.player-root.is-clear:not([inert] *)) .hg-ios-navigation :is(.hg-ios-floating-bar-over-media, .hg-tabbar),
+.plat-ios .hg-ios-navigation[data-immersive="true"] .hg-tabbar {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.plat-ios .hg-ios-navigation[inert] {
+  opacity: .48;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes hg-ios-top-content-in {
+    from { opacity: .2; }
+    to { opacity: 1; }
+  }
+
+  .plat-ios .hg-ios-top-bar :is(.hg-ios-floating-panel > *, .hg-ios-floating-actions > button > *),
+  .plat-ios .hg-ios-top-bar .hg-ios-segments button[aria-pressed="true"]::before {
+    animation: hg-ios-top-content-in 200ms ease-out;
+  }
+
+  @keyframes hg-ios-nav-content-in {
+    from { opacity: .55; }
+    to { opacity: 1; }
+  }
+
+  .plat-ios .hg-tabbar button svg {
+    animation: hg-ios-nav-content-in 150ms ease-out;
+  }
+
+  .plat-ios .hg-ios-navigation :is(.hg-ios-floating-bar-over-media, .hg-tabbar) {
+    transition: opacity 150ms ease, visibility 0s;
+  }
+}
+
+.plat-ios .hg-ios-browse-content {
+  padding-inline: var(--ios-browse-start) var(--ios-browse-end);
+}
+
+.plat-ios :is(.hg-native-feed-scroll, .hg-native-article-page, .hg-ios-back-frame, .hg-ios-sheet-page) {
+  scroll-padding-left: var(--ios-safe-left);
+  scroll-padding-right: var(--ios-safe-right);
+}
+
+.plat-ios .hg-ios-floating-panel,
+.plat-ios .hg-ios-floating-actions {
+  display: flex;
+  align-items: center;
+  min-height: var(--ios-control-target);
+  gap: var(--ios-control-gap);
+  pointer-events: auto;
+}
+
+.plat-ios .hg-ios-floating-panel {
+  position: relative;
+  isolation: isolate;
+  padding-inline: var(--ios-control-gap);
+}
+
+.plat-ios .hg-ios-floating-panel::before {
+  content: "";
+  position: absolute;
+  inset: var(--ios-compact-inset) 0;
+  z-index: -1;
+  border-radius: var(--ios-group-radius);
+  background: color-mix(in srgb, var(--p-s1) 90%, transparent);
+  box-shadow: inset 0 0 0 .5px var(--ios-divider);
+}
+
+.plat-ios .hg-ios-floating-bar-fill-trailing .hg-ios-floating-panel::before {
+  inset-inline-end: calc(-1 * var(--ios-control-target) + var(--ios-compact-inset));
+}
+
+.plat-ios .hg-ios-floating-actions {
+  width: max-content;
+}
+
+.plat-ios .hg-ios-floating-actions-end {
+  grid-column: 3;
+  justify-self: end;
+}
+
+.plat-ios .hg-ios-floating-bar-over-media {
+  --ios-media-chrome: rgba(20, 20, 23, .72);
+  z-index: 20;
+  color: #fff;
+}
+
+.plat-ios .hg-ios-floating-bar-over-media .hg-ios-floating-panel::before {
+  background: var(--ios-media-chrome);
+  box-shadow: inset 0 0 0 .5px var(--ios-media-border);
+}
+
+.plat-ios .hg-article-video:not(:has(.hg-native-article-full)) {
+  margin-inline: var(--ios-browse-start) var(--ios-browse-end);
+  width: auto;
+  overflow: hidden;
+  border-radius: var(--ios-group-radius);
+}
+
+.plat-ios .hg-article-video .hg-ios-article-rail {
+  inset-inline-end: var(--ios-control-gap);
+}
+
+.plat-ios .hg-article-video .hg-ios-inline-controls {
+  padding-inline: calc(2 * var(--ios-control-gap));
+}
+
+.plat-ios .hg-ios-floating-panel .hg-ios-search-field {
+  height: var(--ios-control-target);
+  padding-inline: 8px 0;
+  background: transparent;
+}
+
+.plat-ios .hg-ios-floating-panel:has(.hg-ios-search-field) {
+  padding-inline-end: 0;
+}
+
+.plat-ios .hg-ios-floating-panel:has(.hg-ios-search-field:focus-within)::before {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--p-primary) 55%, transparent);
+}
+
+.plat-ios .hg-ios-floating-button {
+  position: relative;
+  isolation: isolate;
+  color: var(--p-on);
+}
+
+.plat-ios .hg-ios-floating-button::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: var(--ios-compact-inset);
+  border-radius: var(--ios-group-radius);
+  background: color-mix(in srgb, var(--p-s1) 90%, transparent);
+  box-shadow: inset 0 0 0 .5px var(--ios-divider);
+}
+
+.plat-ios :is(.hg-ios-header-back, .hg-ios-header-square) {
+  width: var(--ios-control-target);
+  height: var(--ios-control-target);
+}
+
+.plat-ios .hg-ios-floating-button:active {
+  opacity: .65;
+}
+
+.plat-ios .hg-ios-floating-bar svg {
+  width: var(--ios-header-icon-size);
+  height: var(--ios-header-icon-size);
+}
+
+.plat-ios .hg-ios-floating-bar :is(.hg-ios-ranks-button, .hg-ios-account) svg {
+  width: var(--ios-media-icon-size);
+  height: var(--ios-media-icon-size);
+}
+
+.plat-ios .hg-ios-caption-title {
+  padding-inline: var(--ios-browse-start) var(--ios-browse-end);
+}
+
+.plat-ios .hg-ios-caption-progress {
+  margin-inline: var(--ios-browse-start) var(--ios-browse-end);
+}
+
+.plat-ios .hg-ios-media-top-button {
+  color: #fff;
+}
+
+.plat-ios .hg-ios-media-top-button::before {
+  background: var(--ios-media-chrome);
+  box-shadow: inset 0 0 0 .5px var(--ios-media-border);
+}
+
+.plat-ios .hg-ios-search-field input {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.plat-ios .hg-ios-search-field button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.plat-ios .hg-ios-search-field .hg-ios-search-cancel {
+  width: var(--ios-control-target);
+  height: var(--ios-control-target);
+}
+
+.plat-ios .hg-ios-search-cancel > span {
+  background: transparent;
+}
+
+.plat-ios .hg-ios-search-field input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.plat-ios .hg-ios-segments {
+  padding: var(--ios-control-gap);
+  border-radius: var(--ios-group-radius);
+  background: var(--ios-segment);
+}
+
+.plat-ios .hg-ios-segments button {
+  position: relative;
+  isolation: isolate;
+  flex: 1;
+  min-width: 0;
+  min-height: var(--ios-control-target);
+  padding-inline: 6px;
+  border-radius: var(--ios-control-radius);
+  font-size: 13px;
+  color: var(--p-mut);
+  background: transparent;
+  box-shadow: none;
+}
+
+.plat-ios .hg-ios-segments button[aria-pressed="true"] {
+  color: var(--ios-segment-selected-text, var(--p-on)) !important;
+  background: transparent !important;
+}
+
+.plat-ios .hg-ios-segments button[aria-pressed="true"]::before {
+  content: "";
+  position: absolute;
+  inset: var(--ios-segment-selected-inset, var(--ios-compact-inset)) 0;
+  z-index: -1;
+  border-radius: var(--ios-control-radius);
+  background: var(--ios-segment-selected-surface, var(--ios-selected));
+}
+
+.plat-ios .hg-ios-floating-panel .hg-ios-segments,
+.plat-ios .hg-ios-settings-appearance > .hg-ios-segments {
+  --ios-segment-selected-text: var(--p-primary);
+  --ios-segment-selected-surface: color-mix(in srgb, var(--p-primary) 12%, transparent);
+}
+
+.plat-ios .hg-ios-floating-panel .hg-ios-segments {
+  --ios-segment-selected-inset: var(--ios-segment-face-inset);
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.plat-ios .hg-ios-floating-panel .hg-ios-segments button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: var(--ios-control-gap);
+  color: var(--p-on);
+  white-space: nowrap;
+}
+
+.plat-ios .hg-ios-floating-panel .hg-ios-segments button:active {
+  opacity: .65;
+  transform: none;
+}
+
+.plat-ios .hg-ios-segments-compact {
+  --ios-segment-selected-inset: var(--ios-segment-face-inset);
+  position: relative;
+  isolation: isolate;
+  padding-block: 0;
+  background: transparent;
+}
+
+.plat-ios .hg-ios-segments-compact::before {
+  content: "";
+  position: absolute;
+  inset: var(--ios-compact-inset) 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--ios-compact-segment-surface, var(--ios-segment));
+  box-shadow: var(--ios-compact-segment-outline, none);
+}
+
+.plat-ios .hg-toast:has(.hg-toast-action) {
+  padding-block: var(--ios-control-gap);
+}
+
+.plat-ios .hg-toast-action {
+  min-block-size: var(--ios-control-target);
+  min-inline-size: var(--ios-control-target);
+}
+
+.plat-ios .hg-ios-settings-group {
+  overflow: hidden;
+  background: var(--p-s1);
+}
+
+.plat-ios .hg-ios-settings-group > :not(:last-child) {
+  border-color: var(--ios-divider);
+}
+
+.plat-ios .hg-ios-settings-group > :is(button, div) {
+  min-height: 54px;
+}
+
+.plat-ios .hg-ios-settings-page {
+  --ios-settings-row-inset: 12px;
+  --ios-settings-label-gap: calc(2 * var(--ios-control-gap));
+}
+
+.plat-ios .hg-ios-settings-group > :is(button, div, label),
+.plat-ios .hg-ios-sidebar-settings > :is(summary, div) {
+  padding-inline: var(--ios-settings-row-inset);
+  gap: var(--ios-settings-label-gap);
+}
+
+.plat-ios .hg-ios-settings-appearance {
+  padding-block: calc(2 * var(--ios-control-gap));
+}
+
+.plat-ios .hg-ios-settings-appearance-label {
+  gap: var(--ios-settings-label-gap);
+  margin-bottom: var(--ios-control-gap);
+}
+
+.plat-ios .hg-ios-settings-appearance-label > span:first-child {
+  width: 28px;
+  height: 28px;
+}
+
+.plat-ios .hg-ios-settings-appearance > .hg-ios-segments {
+  --ios-compact-segment-surface: var(--p-s2);
+  --ios-compact-segment-outline: inset 0 0 0 .5px var(--ios-divider);
+  margin-inline: calc(var(--ios-control-gap) - var(--ios-settings-row-inset));
+}
+
+.plat-ios .hg-ios-settings-page .hg-ios-section-label {
+  padding-inline: 0;
+  padding-bottom: 0;
+}
+
+.plat-ios .hg-ios-settings-page .hg-ios-section-label:first-child {
+  margin-top: 0;
+}
+
+.plat-ios .hg-ios-settings-group > .hg-ios-account-row {
+  border: 0;
+  border-radius: 0;
+}
+
+.plat-ios .hg-ios-sidebar-settings > ol {
+  margin-inline: var(--ios-control-gap);
+  margin-bottom: var(--ios-control-gap);
+  gap: var(--ios-control-gap);
+}
+
+.plat-ios .hg-ios-sidebar-settings[open] > summary > span:nth-child(2) {
+  margin-inline-end: 76px;
+}
+
+.plat-ios .hg-ios-sidebar-reset {
+  position: absolute;
+  top: 2px;
+  inset-inline-end: calc(var(--ios-settings-row-inset) + 23px);
+}
+
+.plat-ios .hg-ios-sidebar-reset > span {
+  border-radius: var(--ios-control-radius);
+}
+
+.plat-ios .hg-ios-sidebar-settings > ol > li {
+  border-radius: var(--ios-control-radius);
+}
+
+.plat-ios .hg-ios-switch {
+  --ios-switch-width: 51px;
+  --ios-switch-height: 31px;
+  width: var(--ios-switch-width);
+  height: var(--ios-switch-height);
+  flex-shrink: 0;
+  background: var(--p-s4);
+}
+
+.plat-ios .hg-ios-switch::before {
+  content: "";
+  position: absolute;
+  inset-block: min(0px, calc((var(--ios-switch-height) - var(--ios-control-target)) / 2));
+  inset-inline: min(0px, calc((var(--ios-switch-width) - var(--ios-control-target)) / 2));
+}
+
+.plat-ios .hg-ios-switch[aria-pressed="true"] {
+  background: #30a84e;
+}
+
+.plat-ios .hg-ios-switch > span {
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
+  transition: transform .2s ease;
+}
+
+.plat-ios .hg-ios-switch[aria-pressed="true"] > span {
+  transform: translateX(20px);
+}
+
+.plat-ios .hg-ios-sidebar-settings .hg-ios-switch {
+  --ios-switch-width: 40px;
+  --ios-switch-height: 24px;
+}
+
+.plat-ios .hg-ios-sidebar-settings .hg-ios-switch[aria-pressed="false"] {
+  background: color-mix(in srgb, var(--p-on) 16%, var(--p-s3));
+}
+
+.plat-ios .hg-ios-sidebar-settings .hg-ios-switch > span {
+  width: 20px;
+  height: 20px;
+}
+
+.plat-ios .hg-ios-sidebar-settings .hg-ios-switch[aria-pressed="true"] > span {
+  transform: translateX(16px);
+}
+
+.plat-ios .hg-ios-sheet {
+  max-height: calc(100dvh - var(--sat) - 8px);
+  overflow-y: auto;
+  background: var(--p-s1);
+  border-top-left-radius: var(--r-lg) !important;
+  border-top-right-radius: var(--r-lg) !important;
+}
+
+.plat-ios .hg-ios-sheet-page {
+  max-height: none;
+  overflow: hidden;
+  padding-top: var(--ios-header-top);
+  padding-bottom: var(--sab);
+  background: var(--p-bg);
+  border-radius: 0 !important;
+}
+
+.plat-ios .hg-ios-sheet-page .hg-ios-show-sheet-content {
+  height: 100%;
+  max-height: none;
+}
+
+.plat-ios .hg-ios-comments-panel {
+  height: calc(100% - var(--hg-keyboard-inset, 0px));
+  translate: 0 var(--hg-keyboard-top, 0px);
+  padding-bottom: max(0px, calc(var(--ios-navigation-reserve) - var(--sab) - var(--hg-keyboard-inset, 0px)));
+}
+
+.plat-ios .hg-ios-auth-host {
+  inset-block-start: var(--hg-keyboard-top, 0px);
+  inset-block-end: max(0px, calc(var(--hg-keyboard-inset, 0px) - var(--hg-keyboard-top, 0px)));
+}
+
+.plat-ios .hg-ios-auth-form {
+  max-height: calc(100dvh - var(--hg-keyboard-inset, 0px) - var(--sat) - var(--sab) - 32px);
+}
+
+.plat-ios .hg-ios-auth-host[data-compact-keyboard] .hg-ios-auth-form {
+  max-height: calc(100dvh - var(--hg-keyboard-inset, 0px) - var(--sab) - 16px);
+  gap: var(--ios-control-gap);
+  padding-block: var(--ios-control-gap);
+}
+
+.plat-ios .hg-ios-auth-host[data-constrained-keyboard] .hg-ios-auth-form {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.plat-ios .hg-ios-auth-host[data-constrained-keyboard] .hg-ios-auth-form > [data-keyboard-scroll] {
+  flex: none;
+  overflow: visible;
+}
+
+.plat-ios .hg-ios-comments-header {
+  flex: 0 0 calc(var(--ios-control-target) + 8px);
+}
+
+.plat-ios .hg-ios-comments-panel[data-compact-keyboard] .hg-ios-comments-header {
+  display: none;
+}
+
+.plat-ios .hg-ios-comments-list > .hg-ios-content-card + .hg-ios-content-card {
+  margin-top: calc(2 * var(--ios-control-gap));
+}
+
+.plat-ios .hg-ios-sheet:has(.hg-ios-show-sheet-content) > .hg-ios-sheet-grabber {
+  padding-top: 8px;
+}
+
+.plat-ios .hg-ios-sheet:has(.hg-ios-show-sheet-content) > .hg-ios-sheet-grabber > div {
+  width: 24px;
+  height: 3px;
+}
+
+.plat-ios .hg-ios-alert {
+  max-height: calc(100dvh - var(--sat) - var(--sab) - 20px);
+  overflow-y: auto;
+  background: var(--p-s1);
+  border-radius: var(--r-lg);
+}
+
+.plat-ios .hg-ios-sheet-title {
+  font-size: 19px;
+}
+
+.plat-ios .hg-ios-detail-cover {
+  width: 64px;
+}
+
+.plat-ios .hg-ios-detail-overview {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: calc(2 * var(--ios-control-gap));
+}
+
+.plat-ios .hg-ios-detail-info-column {
+  display: contents;
+}
+
+.plat-ios .hg-ios-detail-info {
+  align-self: center;
+}
+
+.plat-ios .hg-ios-detail-metrics {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ios-control-gap);
+  margin-top: 0;
+  padding-top: calc(2 * var(--ios-control-gap));
+  border-top: .5px solid var(--ios-divider);
+  text-align: center;
+}
+
+.plat-ios .hg-ios-show-sheet-content {
+  max-height: min(72dvh, calc(100dvh - var(--sat) - var(--sab) - 24px));
+}
+
+.plat-ios .hg-ios-show-sheet-content .hg-ios-episode-panel {
+  height: auto;
+  max-height: 100%;
+}
+
+.plat-ios .hg-ios-detail-page {
+  padding-top: calc(var(--ios-control-target) + 8px);
+  padding-bottom: max(0px, calc(var(--ios-navigation-reserve) - var(--sab)));
+}
+
+.plat-ios .hg-ios-episode-card {
+  margin-inline: var(--ios-browse-start) var(--ios-browse-end);
+  margin-bottom: calc(2 * var(--ios-control-gap));
+  background: var(--p-s1);
+  box-shadow: inset 0 0 0 .5px var(--ios-divider);
+}
+
+.plat-ios .hg-ios-episode-button {
+  min-height: var(--ios-control-target);
+  border-radius: var(--ios-control-radius);
+}
+
+.plat-ios .hg-ios-episode-button[aria-current="true"] {
+  background: color-mix(in srgb, var(--p-primary) 16%, var(--p-s3));
+  color: var(--p-primary);
+}
+
+.plat-ios :is(.hg-ios-input, .hg-ios-primary) {
+  min-height: 44px;
+  border-radius: var(--ios-control-radius);
+}
+
+.plat-ios .hg-ios-media-button,
+.plat-ios .hg-ios-full-exit {
+  display: inline-grid;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(25, 25, 28, .86);
+  color: #fff;
+}
+
+.plat-ios .hg-ios-media-button:disabled {
+  opacity: .52;
+}
+
+.plat-ios .player-root {
+  background: #000;
+  overflow: clip;
+}
+
+/* AVPlayerLayer sits immediately behind WKWebView. The active stack entry
+   keeps its web controls, while the underlying pages stay out of the composite. */
+html:has(.hg-native-video.is-ready),
+html:has(.hg-native-video.is-ready) body,
+.plat-ios:has(.hg-native-video.is-ready),
+.plat-ios .bg-canvas:has(.hg-native-video.is-ready),
+.plat-ios .hg-home-video:has(.hg-native-video.is-ready),
+.plat-ios .win-main:has(.hg-native-video.is-ready),
+.plat-ios .a-page-in:has(.hg-native-video.is-ready),
+.plat-ios .player-root:has(.hg-native-video.is-ready) {
+  background: transparent;
+}
+
+.plat-ios .hg-ios-page-layer:has(.hg-native-video.is-ready) > div:not(:has(.hg-native-video.is-ready)),
+.plat-ios .player-root:has(.hg-native-video.is-ready) > .blur-3xl {
+  visibility: hidden;
+}
+
+.plat-ios .hg-ios-video-actions {
+  box-sizing: border-box;
+  width: var(--ios-control-target);
+  isolation: isolate;
+  color: #fff;
+}
+
+.plat-ios .hg-ios-video-actions::before,
+.plat-ios .hg-home-account::before {
+  content: "";
+  position: absolute;
+  inset: var(--ios-compact-inset);
+  z-index: -1;
+  border-radius: var(--ios-group-radius);
+  background: var(--ios-media-chrome);
+  box-shadow: inset 0 0 0 .5px var(--ios-media-border);
+  pointer-events: none;
+}
+
+.plat-ios .hg-ios-video-actions button {
+  width: var(--ios-control-target);
+  height: var(--ios-control-target);
+  flex-shrink: 0;
+  justify-content: center;
+  gap: var(--ios-control-gap);
+}
+
+.plat-ios .hg-ios-video-actions .hg-ios-media-button,
+.plat-ios .hg-ios-video-actions .hg-ios-full-exit {
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  box-shadow: none;
+}
+
+.plat-ios .hg-ios-full-rail {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.plat-ios .hg-ios-article-rail {
+  top: var(--ios-control-gap);
+  width: max-content;
+  flex-direction: row;
+}
+
+.plat-ios .hg-ios-full-footer-surface {
+  position: absolute;
+  z-index: 20;
+  inset-inline: var(--ios-browse-start) var(--ios-browse-end);
+  bottom: calc(var(--sab) + 5px);
+  height: 72px;
+  pointer-events: none;
+  border: .5px solid var(--ios-media-border);
+  border-radius: var(--ios-group-radius);
+  background: var(--ios-media-chrome);
+}
+
+.plat-ios :is(.hg-ios-video-actions, .hg-home-account) svg {
+  width: var(--ios-media-icon-size);
+  height: var(--ios-media-icon-size);
+  filter: none;
+}
+
+.plat-ios .hg-play-glyph {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
+.plat-ios .hg-play-glyph svg {
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .65));
+}
+
+.plat-ios .hg-ios-feed-error {
+  pointer-events: none;
+}
+
+.plat-ios .hg-ios-feed-error > div {
+  pointer-events: auto;
+  border-radius: var(--ios-group-radius);
+}
+
+.plat-ios .hg-ios-inline-controls {
+  pointer-events: none;
+}
+
+.plat-ios .hg-ios-inline-controls :is(input, button) {
+  pointer-events: auto;
+}
+
+.plat-ios .hg-ios-inline-controls > div {
+  gap: 3px;
+}
+
+.plat-ios .hg-ios-inline-controls button {
+  min-width: var(--ios-control-target);
+  height: var(--ios-control-target);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.plat-ios .hg-ios-inline-controls .hg-ios-media-button {
+  background: transparent;
+}
+
+.plat-ios .hg-ios-inline-controls .hg-range::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+}
+
+/* The video fills the screen-sized stage. Safe-area offsets apply to controls only. */
+.plat-ios .hg-feed-video video {
+  display: block;
+  object-position: 50% 50%;
+}
+
+.plat-ios .hg-ios-feed-rail {
+  bottom: calc(var(--sab) + var(--hg-player-bottom-inset) + 92px);
+}
+
+@media (orientation: landscape) {
+  .plat-ios {
+    --ios-header-start: max(calc(var(--ios-header-side-inset) - var(--ios-compact-inset)), calc(var(--ios-safe-left) + var(--ios-control-gap)));
+    --ios-header-end: max(calc(var(--ios-header-side-inset) - var(--ios-compact-inset)), calc(var(--ios-safe-right) + var(--ios-control-gap)));
+    /* A flip between landscape directions can leave the previous side reported briefly. */
+    --ios-playback-rail-end: max(var(--ios-header-end), calc(var(--ios-safe-side) + var(--ios-control-gap)), var(--ios-playback-rail-min, 0px));
+    --ios-browse-start: calc(var(--ios-header-start) + var(--ios-compact-inset));
+    --ios-browse-end: calc(var(--ios-header-end) + var(--ios-compact-inset));
+  }
+
+  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail) {
+    --hg-rail-top: calc(var(--ios-header-top) + var(--ios-control-target) + var(--ios-control-gap));
+    --hg-rail-bottom: calc(var(--sab) + var(--hg-player-bottom-inset) + 52px);
+    --hg-rail-columns: 1;
+    display: grid;
+    grid-template-columns: repeat(var(--hg-rail-columns), var(--ios-control-target));
+    inline-size: calc(var(--hg-rail-columns) * var(--ios-control-target) + (var(--hg-rail-columns) - 1) * var(--ios-control-gap));
+    top: var(--hg-rail-top);
+    bottom: var(--hg-rail-bottom);
+    height: max-content;
+    max-height: calc(100% - var(--hg-rail-top) - var(--hg-rail-bottom));
+    margin-block: auto;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    transform: none;
+  }
+
+  .plat-ios .hg-ios-full-rail {
+    --hg-rail-bottom: calc(var(--sab) + 78px);
+
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plat-ios :is(.hg-ios-back-frame, .hg-ios-sheet, .hg-ios-alert) {
+    animation-duration: .01ms;
+  }
+}
+
+.plat-ios .hg-ios-section-label {
+  display: block;
+  padding: 0 4px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--p-mut);
+}
+
+.plat-ios .hg-ios-grouped-list {
+  overflow: hidden;
+  border: .5px solid var(--ios-divider);
+  border-radius: var(--ios-group-radius);
+  background: var(--p-s1);
+}
+
+.plat-ios .hg-ios-cache-detail-card {
+  padding: calc(var(--ios-control-gap) - .5px);
+}
+
+.plat-ios .hg-ios-cache-actions button {
+  box-shadow: inset 0 0 0 .5px var(--ios-divider);
+}
+
+.plat-ios :is(.hg-ios-cache-actions, .hg-ios-cache-episodes) button {
+  border-radius: var(--ios-control-radius);
+}
+
+.plat-ios .hg-ios-cache-action-face {
+  border-radius: var(--ios-control-radius);
+}
+
+.plat-ios .hg-ios-list-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  position: relative;
+  width: 100%;
+  min-height: 52px;
+  padding: 7px 12px;
+  text-align: left;
+  font-size: 15px;
+}
+
+.plat-ios .hg-ios-list-row + .hg-ios-list-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 53px;
+  right: 0;
+  border-top: .5px solid var(--ios-divider);
+}
+
+.plat-ios .hg-ios-list-row:active {
+  background: var(--p-s3);
+}
+
+.plat-ios .hg-ios-list-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: var(--ios-control-radius);
+  background: var(--p-pc);
+  color: var(--p-on-pc);
+}
+
+.plat-ios .hg-ios-search-content {
+  --ios-search-tag-height: 26px;
+}
+
+.plat-ios .hg-ios-search-content .hg-ios-section-label {
+  padding: 0;
+}
+
+.plat-ios .hg-ios-search-card-heading {
+  position: relative;
+  min-height: var(--ios-search-tag-height);
+}
+
+.plat-ios .hg-ios-search-clear {
+  --ios-search-clear-inset: calc(var(--ios-control-target) - var(--ios-search-tag-height) - var(--ios-control-gap));
+  position: absolute;
+  inset-block-start: calc(-1 * var(--ios-search-clear-inset));
+  inset-inline-end: 0;
+  min-width: var(--ios-control-target);
+  min-height: var(--ios-control-target);
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding-block-start: var(--ios-search-clear-inset);
+}
+
+.plat-ios .hg-ios-search-clear > span {
+  height: var(--ios-search-tag-height);
+}
+
+.plat-ios .hg-ios-search-topics {
+  margin-top: calc(2 * var(--ios-control-gap));
+}
+
+.plat-ios .hg-ios-search-topics:first-child {
+  margin-top: 0;
+}
+
+.plat-ios .hg-ios-content-card {
+  border-radius: var(--ios-group-radius);
+  background: var(--p-s1);
+  box-shadow: inset 0 0 0 .5px var(--ios-divider);
+  padding: calc(2 * var(--ios-control-gap));
+}
+
+.plat-ios .hg-ios-content-card-next {
+  margin-top: calc(2 * var(--ios-control-gap));
+}
+
+.plat-ios .hg-ios-search-tag-list {
+  gap: 0 var(--ios-control-gap);
+  margin-top: var(--ios-control-gap);
+}
+
+.plat-ios .hg-ios-search-tag {
+  position: relative;
+  isolation: isolate;
+  height: var(--ios-control-target);
+  padding-inline: 9px;
+  border-radius: var(--ios-control-radius);
+  font-size: 12px;
+  min-inline-size: var(--ios-control-target);
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+}
+
+.plat-ios .hg-ios-search-tag::before {
+  content: "";
+  position: absolute;
+  inset: calc((var(--ios-control-target) - var(--ios-search-tag-height)) / 2) 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--p-s3);
+}
+
+.plat-ios .hg-ios-account-row {
+  min-height: 66px;
+  padding: 10px 12px;
+  border: .5px solid var(--ios-divider);
+  border-radius: var(--ios-group-radius);
+  box-shadow: none;
+}
+
+.plat-ios :is(.hg-native-article-page, .hg-article-video, .hg-native-article-frame):has(.hg-native-video.is-ready) {
+  background: transparent;
+}
+
+.plat-ios .hg-native-article-full {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  width: 100%;
+  height: 100%;
+}
+
+.plat-ios .hg-native-article-page:has(> .hg-article-media-overlay) > :not(.hg-article-media-overlay),
+.plat-ios .hg-native-article-page:has(.hg-native-article-full) > :not(.hg-native-article-scroll),
+.plat-ios .hg-native-article-scroll:has(.hg-native-article-full) > :not(.hg-article-video) {
+  visibility: hidden;
+}
+
+.plat-ios .hg-native-article-scroll:has(.hg-native-article-full) {
+  overflow: hidden;
+}
+
+.plat-ios .hg-native-article-full .hg-ios-inline-controls {
+  padding-bottom: var(--ios-navigation-reserve);
+}
+
+
+.plat-ios .hg-ios-video-actions { touch-action: pan-y; }
+
+.plat-ios :is(.hg-ios-playback-column, .hg-ios-full-rail) {
+  inset-inline-end: var(--ios-playback-rail-end, var(--ios-header-end));
+}
+
+.plat-ios .hg-ios-playback-column {
+  width: var(--ios-control-target);
+}
+
+.plat-ios .hg-ios-feed-rail {
+  inset-inline-end: 0;
+}
+
+.plat-ios .hg-home-account {
+  -webkit-appearance: none;
+  appearance: none;
+  width: var(--ios-control-target);
+  height: var(--ios-control-target);
+  isolation: isolate;
+  color: #fff;
+  pointer-events: auto;
+}
+
+.plat-ios .hg-home-account:active {
+  opacity: .65;
+}
+
+.plat-ios .player-root.is-clear :is(.hg-clear-chrome, .hg-ios-video-actions, .hg-ios-video-caption, .hg-home-account) {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.plat-ios .hg-native-article-page,
+.plat-ios .hg-native-article-scroll {
+  touch-action: pan-y;
+}
+
+.plat-ios :is(.hg-article-media-overlay, .hg-native-article-full) {
+  touch-action: none;
+}
+
+.plat-ios .hg-native-article-page:has(.hg-article-media-overlay) .hg-native-article-scroll {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .plat-ios [data-hg-motion="in"] {
+    animation: hg-article-enter 180ms ease-out both;
+  }
+
+  .plat-ios [data-hg-motion="out"] {
+    animation: hg-article-exit 140ms ease-in both;
+  }
+}
+
+@keyframes hg-article-enter {
+  from { transform: translate3d(var(--hg-slide-x), var(--hg-slide-y), 0); opacity: .25; }
+  to { transform: translate3d(0, 0, 0); opacity: 1; }
+}
+
+@keyframes hg-article-exit {
+  from { transform: translate3d(0, 0, 0); opacity: 1; }
+  to { transform: translate3d(var(--hg-slide-x), var(--hg-slide-y), 0); opacity: .25; }
+}
+
+.plat-ios [data-hg-browse-kind] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.plat-ios [data-hg-browse-kind] img {
+  -webkit-touch-callout: none;
+  pointer-events: none;
+}
+
+/* UIKit previews use the card's resting bounds. */
+.plat-ios [data-hg-menu-card].pressable:active {
+  transform: none;
+}
+
+.plat-ios .hg-ios-back-frame {
+  box-shadow: -18px 0 40px rgb(0 0 0 / .3);
+}
+
+.plat-ios :is(.hg-ios-back-frame, .hg-ios-sheet-page),
+.plat-ios :is(.hg-ios-back-frame, .hg-ios-sheet-page) .scroll-y {
+  touch-action: pan-y;
+}
+
+
+@media (orientation: landscape) {
+  .plat-ios :is(.hg-home-video, .hg-ios-back-frame) .hg-ios-caption-scrim {
+    height: 64px;
+  }
+
+  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail):has(> button:nth-child(5)) {
+    --hg-rail-columns: 2;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 375px) {
+  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail) {
+    row-gap: 2px;
+  }
+
+  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail):has(> button:nth-child(4)) {
+    --hg-rail-columns: 2;
+  }
+
+  .plat-ios .hg-ios-auth-form {
+    padding-block: calc(2 * var(--ios-control-gap));
+  }
+
+  .plat-ios .hg-ios-auth-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--ios-control-gap);
+  }
+
+  .plat-ios .hg-ios-auth-fields[data-registration="true"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (orientation: landscape) and (max-height: 389px) {
+  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail):has(> button:nth-child(7)) {
+    --hg-rail-columns: 3;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .plat-ios {
+    --ios-top-inset: 8px;
+    --ios-header-top: var(--ios-top-inset);
+    /* Keep the rail clear even when both landscape insets report zero. */
+    --ios-playback-rail-min: 76px;
+  }
+}

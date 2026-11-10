@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="canvas" x2="1" y2="1">
+      <stop stop-color="#30221B"/>
+      <stop offset="1" stop-color="#171213"/>
+    </linearGradient>
+    <linearGradient id="fruit" x1=".22" y1=".05" x2=".78" y2="1">
+      <stop stop-color="#FFF09A"/>
+      <stop offset=".47" stop-color="#FFD24C"/>
+      <stop offset="1" stop-color="#EE9D23"/>
+    </linearGradient>
+    <linearGradient id="leaf" x2="1" y2="1">
+      <stop stop-color="#F1E58C"/>
+      <stop offset="1" stop-color="#C1BB5D"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#canvas)" d="M0 0h1024v1024H0z"/>
+  <path fill="#100D0C" opacity=".45" d="M785 584c0 157-122 283-273 283S239 741 239 584c0-157 122-283 273-283s273 126 273 283Z"/>
+  <path fill="url(#fruit)" d="M786 565c0 151-122 274-274 274S238 716 238 565s122-274 274-274 274 123 274 274Z"/>
+  <path fill="url(#leaf)" d="M498 268c2-79 61-127 164-123-13 76-69 124-164 123Z"/>
+  <path fill="#65401F" opacity=".24" d="M507 270c41-43 86-68 133-77-46 22-83 47-115 77Z"/>
+  <path fill="#34221A" d="M459 453c-17-10-38 2-38 22v180c0 20 21 32 38 22l153-90c17-10 17-34 0-44Z"/>
+</svg>

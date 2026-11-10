@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "app.hghub.personal",
+  "build": {
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "HGViewer"
+      }
+    ]
+  },
+  "bundle": {
+    "targets": "all",
+    "iOS": {
+      "minimumSystemVersion": "17.1",
+      "bundleVersion": "1.1.77"
+    }
+  }
+}
