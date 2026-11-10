@@ -16,9 +16,6 @@ export type VideoHandle = {
   setQuality: (level: number) => void;
   slideOut?: (direction: number) => void;
   pullEdge?: (offset: number, axis?: "horizontal" | "vertical") => void;
-  rate: (r: number) => void;
-  mute: (m: boolean) => void;
-  volume: (v: number) => void;
 };
 
 export type VideoSurfaceProps = {
@@ -85,9 +82,6 @@ const VideoSurface = forwardRef<VideoHandle, VideoSurfaceProps>(function VideoSu
       }
     },
     setQuality: (level: number) => { if (hlsRef.current) hlsRef.current.loadLevel = level; },
-    rate: (r: number) => { const v = videoRef.current; if (v) v.playbackRate = r; },
-    mute: (m: boolean) => { const v = videoRef.current; if (v) v.muted = m; },
-    volume: (vol: number) => { const v = videoRef.current; if (v) v.volume = vol; },
   }), []);
 
   useEffect(() => {

@@ -93,6 +93,40 @@ function StackPage({ page, onBack, wide, top, bottomInset, onArticleFullscreen }
   return null;
 }
 
+const IOS_STACK_ACCOUNT_PAGES = new Set<Page["kind"]>(["channel", "ranks", "posts", "offline", "recent-cache"]);
+
+function WorkspaceStack({ wide, bottomInset, account, onArticleFullscreen }: {
+  wide: boolean;
+  bottomInset: number;
+  account?: React.ReactNode;
+  onArticleFullscreen?: (key: string, full: boolean) => void;
+}) {
+  const { stack, pop } = useStore();
+  return stack.map((page, index) => {
+    const top = index === stack.length - 1;
+    const playback = page.kind === "feed";
+    const article = page.kind === "post";
+    const content = <StackPage page={page} onBack={pop} wide={wide} top={top}
+      bottomInset={!isMobile || (isIos && playback) ? bottomInset : 0}
+      onArticleFullscreen={onArticleFullscreen} />;
+
+    if (isIos) {
+      return <IOSNavigationScope key={page.key} active={top}
+        account={IOS_STACK_ACCOUNT_PAGES.has(page.kind) ? account : undefined}>
+        <IOSChannelBackFrame active={top} onBack={pop} gestureEnabled={!playback && !article} transparent={article}>
+          {content}
+        </IOSChannelBackFrame>
+      </IOSNavigationScope>;
+    }
+
+    return <div key={page.key} inert={!top}
+      className={`absolute inset-0 z-30 bg-bg ${isMobile ? "a-page-in" : "win-page-in"}`}
+      style={{ boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>
+      {content}
+    </div>;
+  });
+}
+
 function useWorkspaceWidth(initialWide: boolean) {
   const ref = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(initialWide);
@@ -138,7 +172,7 @@ function WorkspaceTabs({ wide, bottomInset, account }: { wide: boolean; bottomIn
 
 /* ============ 应用主体 ============ */
 function AppBody() {
-  const { tab, stack, pop, push, fs, loginOpen } = useStore();
+  const { tab, stack, fs, loginOpen } = useStore();
   const topPage = stack.at(-1);
   const currentPage = topPage?.kind;
   const [fullscreenArticleKey, setFullscreenArticleKey] = useState<string>();
@@ -150,48 +184,32 @@ function AppBody() {
     : tab === "home");
   useEffect(() => {
     if (!isIos) return;
-    const landscape = window.matchMedia("(orientation: landscape)");
-    const compactLandscape = window.matchMedia("(orientation: landscape) and (max-height: 500px)");
+    const hideStatusBar = window.matchMedia(showingPlayback
+      ? "(orientation: landscape)"
+      : "(orientation: landscape) and (max-height: 500px)");
     const update = () => {
       void invoke("set_ios_status_bar_hidden", {
-        hidden: landscape.matches && (compactLandscape.matches || showingPlayback),
+        hidden: hideStatusBar.matches,
       }).catch(() => {});
     };
     update();
-    landscape.addEventListener("change", update);
-    compactLandscape.addEventListener("change", update);
-    return () => {
-      landscape.removeEventListener("change", update);
-      compactLandscape.removeEventListener("change", update);
-    };
+    hideStatusBar.addEventListener("change", update);
+    return () => hideStatusBar.removeEventListener("change", update);
   }, [showingPlayback]);
 
   const { ref: mainRef, wide } = useWorkspaceWidth(false);
   const bottomInset = fs ? 0 : MOBILE_TAB_HEIGHT;
-  const account = isIos && !fs ? <IOSAccountButton onClick={() => push({ kind: "settings" })} /> : undefined;
+  const account = isIos && !fs ? <IOSAccountButton /> : undefined;
   const pages = <>
     <WorkspaceTabs wide={wide} bottomInset={bottomInset} account={account} />
-    {stack.map((p, i) => {
-      const top = i === stack.length - 1;
-      const playback = isIos && p.kind === "feed";
-      const page = <StackPage page={p} onBack={pop} wide={wide} top={top}
-        bottomInset={playback ? bottomInset : 0} onArticleFullscreen={reportArticleFullscreen} />;
-      if (isIos) {
-        const hasAccount = ["channel", "ranks", "posts", "offline", "recent-cache"].includes(p.kind);
-        return <IOSNavigationScope key={p.key} active={top} account={hasAccount ? account : undefined}>
-          <IOSChannelBackFrame active={top} onBack={pop} gestureEnabled={!playback && p.kind !== "post"} transparent={p.kind === "post"}>
-            {page}
-          </IOSChannelBackFrame>
-        </IOSNavigationScope>;
-      }
-      return <div key={p.key} inert={!top} className="absolute inset-0 z-30 a-page-in bg-bg" style={{ boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>{page}</div>;
-    })}
+    <WorkspaceStack wide={wide} bottomInset={bottomInset} account={account} onArticleFullscreen={reportArticleFullscreen} />
   </>;
 
   return (
     <div className="absolute inset-0 flex bg-canvas">
       <div ref={mainRef} className="relative flex-1 min-w-0 overflow-hidden win-main">
-        {isIos ? <IOSNavigation immersive={fs} bottom={<TabBar overPlayback={showingPlayback} />}>{pages}</IOSNavigation>
+        {isIos ? <IOSNavigation immersive={fs} playbackRoute={topPage ? currentPage === "feed" : tab === "home"}
+          bottom={<TabBar overPlayback={showingPlayback} />}>{pages}</IOSNavigation>
           : <>{pages}{!fs && !currentPage && <TabBar />}</>}
       </div>
     </div>
@@ -215,7 +233,7 @@ function DesktopShell() {
 }
 
 function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boolean }) {
-  const { stack, pop, platform } = useStore();
+  const { platform } = useStore();
   const { ref: mainRef, wide } = useWorkspaceWidth(true);
 
   return (
@@ -223,11 +241,7 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
       {!theater && <DesktopRail collapsed={collapsed} />}
       <div ref={mainRef} className={`relative flex-1 min-w-0 overflow-hidden win-main ${theater ? "is-theater-main" : ""}`}>
         <WorkspaceTabs wide={wide} bottomInset={14} />
-        {stack.map((p, i) => (
-          <div key={p.key} className="absolute inset-0 z-30 bg-bg win-page-in" style={{ boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>
-            <StackPage page={p} onBack={pop} wide={wide} top={i === stack.length - 1} bottomInset={14} />
-          </div>
-        ))}
+        <WorkspaceStack wide={wide} bottomInset={14} />
       </div>
     </div>
   );

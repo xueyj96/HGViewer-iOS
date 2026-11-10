@@ -87,9 +87,6 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
     setQuality: (level) => send("quality", level),
     slideOut: (direction) => void sendMotion("slide_out", direction),
     pullEdge: (offset, axis) => void sendMotion(axis === "horizontal" ? "episode_pull" : "edge_pull", offset),
-    rate: (value) => send("rate", value),
-    mute: (value) => send("mute", Number(value)),
-    volume: (value) => send("volume", value),
   }));
 
   useEffect(() => {

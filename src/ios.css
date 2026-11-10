@@ -35,11 +35,11 @@
   --ios-safe-left: max(env(safe-area-inset-left, 0px), var(--ios-native-safe-left, 0px));
   --ios-safe-right: max(env(safe-area-inset-right, 0px), var(--ios-native-safe-right, 0px));
   --ios-safe-side: max(var(--ios-safe-left), var(--ios-safe-right));
-  --ios-browse-edge: max(var(--ios-header-side-inset), calc(var(--ios-safe-side) + var(--ios-compact-inset)));
-  --ios-browse-start: var(--ios-browse-edge);
-  --ios-browse-end: var(--ios-browse-edge);
-  --ios-header-start: calc(var(--ios-browse-start) - var(--ios-compact-inset));
-  --ios-header-end: calc(var(--ios-browse-end) - var(--ios-compact-inset));
+  --ios-header-edge: calc(var(--ios-header-side-inset) - var(--ios-compact-inset));
+  --ios-header-start: max(var(--ios-header-edge), var(--ios-safe-side));
+  --ios-header-end: var(--ios-header-start);
+  --ios-browse-start: calc(var(--ios-header-start) + var(--ios-compact-inset));
+  --ios-browse-end: calc(var(--ios-header-end) + var(--ios-compact-inset));
   --ios-header-top: calc(var(--sat, 0px) + var(--ios-control-gap));
   --ios-header-content-top: calc(var(--ios-header-top) + var(--ios-control-target) + 8px);
   --ios-navigation-bottom: calc(env(safe-area-inset-bottom, 0px) + 2 * var(--ios-control-gap) - var(--ios-compact-inset));
@@ -892,11 +892,6 @@ html:has(.hg-native-video.is-ready) body,
   box-shadow: none;
 }
 
-.plat-ios .hg-ios-full-rail {
-  top: 50%;
-  transform: translateY(-50%);
-}
-
 .plat-ios .hg-ios-article-rail {
   top: var(--ios-control-gap);
   width: max-content;
@@ -976,18 +971,49 @@ html:has(.hg-native-video.is-ready) body,
   object-position: 50% 50%;
 }
 
+/* Episode playback rail: the normal column and the immersive rail share the safe edge. */
+.plat-ios .hg-ios-playback-rail-host {
+  opacity: 0;
+}
+
+.plat-ios .hg-ios-playback-rail-host[data-visible="true"] {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .plat-ios .hg-ios-playback-rail-host {
+    transition: opacity 160ms ease;
+  }
+}
+
+.plat-ios .hg-ios-playback-rail-host > [hidden] {
+  display: none;
+}
+
+.plat-ios :is(.hg-ios-playback-column, .hg-ios-full-rail) {
+  inset-inline-end: var(--ios-playback-rail-end, var(--ios-header-end));
+}
+
+.plat-ios .hg-ios-playback-column {
+  width: var(--ios-control-target);
+}
+
 .plat-ios .hg-ios-feed-rail {
+  inset-inline-end: 0;
   bottom: calc(var(--sab) + var(--hg-player-bottom-inset) + 92px);
+}
+
+.plat-ios .hg-ios-full-rail {
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 @media (orientation: landscape) {
   .plat-ios {
-    --ios-header-start: max(calc(var(--ios-header-side-inset) - var(--ios-compact-inset)), calc(var(--ios-safe-left) + var(--ios-control-gap)));
-    --ios-header-end: max(calc(var(--ios-header-side-inset) - var(--ios-compact-inset)), calc(var(--ios-safe-right) + var(--ios-control-gap)));
+    --ios-header-start: max(var(--ios-header-edge), calc(var(--ios-safe-left) + var(--ios-control-gap)));
+    --ios-header-end: max(var(--ios-header-edge), calc(var(--ios-safe-right) + var(--ios-control-gap)));
     /* A flip between landscape directions can leave the previous side reported briefly. */
     --ios-playback-rail-end: max(var(--ios-header-end), calc(var(--ios-safe-side) + var(--ios-control-gap)), var(--ios-playback-rail-min, 0px));
-    --ios-browse-start: calc(var(--ios-header-start) + var(--ios-compact-inset));
-    --ios-browse-end: calc(var(--ios-header-end) + var(--ios-compact-inset));
   }
 
   .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail) {
@@ -1009,9 +1035,27 @@ html:has(.hg-native-video.is-ready) body,
 
   .plat-ios .hg-ios-full-rail {
     --hg-rail-bottom: calc(var(--sab) + 78px);
-
   }
 
+  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail):has(> button:nth-child(5)) {
+    --hg-rail-columns: 2;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 375px) {
+  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail) {
+    row-gap: 2px;
+  }
+
+  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail):has(> button:nth-child(4)) {
+    --hg-rail-columns: 2;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 389px) {
+  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail):has(> button:nth-child(7)) {
+    --hg-rail-columns: 3;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1202,18 +1246,6 @@ html:has(.hg-native-video.is-ready) body,
 
 .plat-ios .hg-ios-video-actions { touch-action: pan-y; }
 
-.plat-ios :is(.hg-ios-playback-column, .hg-ios-full-rail) {
-  inset-inline-end: var(--ios-playback-rail-end, var(--ios-header-end));
-}
-
-.plat-ios .hg-ios-playback-column {
-  width: var(--ios-control-target);
-}
-
-.plat-ios .hg-ios-feed-rail {
-  inset-inline-end: 0;
-}
-
 .plat-ios .hg-home-account {
   -webkit-appearance: none;
   appearance: none;
@@ -1297,21 +1329,9 @@ html:has(.hg-native-video.is-ready) body,
   .plat-ios :is(.hg-home-video, .hg-ios-back-frame) .hg-ios-caption-scrim {
     height: 64px;
   }
-
-  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail):has(> button:nth-child(5)) {
-    --hg-rail-columns: 2;
-  }
 }
 
 @media (orientation: landscape) and (max-height: 375px) {
-  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail) {
-    row-gap: 2px;
-  }
-
-  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail):has(> button:nth-child(4)) {
-    --hg-rail-columns: 2;
-  }
-
   .plat-ios .hg-ios-auth-form {
     padding-block: calc(2 * var(--ios-control-gap));
   }
@@ -1324,12 +1344,6 @@ html:has(.hg-native-video.is-ready) body,
 
   .plat-ios .hg-ios-auth-fields[data-registration="true"] {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (orientation: landscape) and (max-height: 389px) {
-  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail):has(> button:nth-child(7)) {
-    --hg-rail-columns: 3;
   }
 }
 

@@ -28,9 +28,6 @@ typedef struct { double x, y, width, height, top, bottom; bool viewport; } HGPla
 @property(nonatomic) double pendingPosition;
 @property(nonatomic) double seekTarget;
 @property(nonatomic, strong) id endObserver;
-@property(nonatomic, strong) UIColor *webColor;
-@property(nonatomic, strong) UIColor *scrollColor;
-@property(nonatomic) BOOL webOpaque;
 @property(nonatomic) BOOL wantsPlay;
 @property(nonatomic) BOOL seeking;
 @property(nonatomic) BOOL ended;
@@ -54,10 +51,16 @@ static void ClosePlayer(WKWebView *web) {
     ((AVPlayerLayer *)view.layer).player = nil;
     [view.slideBackdrop removeFromSuperview];
     [view removeFromSuperview];
-    web.backgroundColor = view.webColor;
-    web.scrollView.backgroundColor = view.scrollColor;
-    web.opaque = view.webOpaque;
     objc_setAssociatedObject(web, &playerKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void PreparePlaybackHost(WKWebView *web, UIView *parent) {
+    // The page paints its own theme. Keep the native surface black and the
+    // WebView transparent even between player sessions, when no layer is ready.
+    if (![parent.backgroundColor isEqual:UIColor.blackColor]) parent.backgroundColor = UIColor.blackColor;
+    if (web.opaque) web.opaque = NO;
+    if (![web.backgroundColor isEqual:UIColor.clearColor]) web.backgroundColor = UIColor.clearColor;
+    if (![web.scrollView.backgroundColor isEqual:UIColor.clearColor]) web.scrollView.backgroundColor = UIColor.clearColor;
 }
 
 static void SetPullOffset(HGPlayerView *view, CGPoint offset) {
@@ -255,13 +258,8 @@ bool hg_player_open(void *rawWeb, uint64_t token, const char *source, bool local
     AVPlayerLayer *layer = (AVPlayerLayer *)view.layer;
     layer.player = view.player;
     layer.videoGravity = AVLayerVideoGravityResizeAspect;
-    view.webOpaque = web.opaque;
-    view.webColor = web.backgroundColor;
-    view.scrollColor = web.scrollView.backgroundColor;
+    PreparePlaybackHost(web, parent);
     [parent insertSubview:view belowSubview:web];
-    web.opaque = NO;
-    web.backgroundColor = UIColor.clearColor;
-    web.scrollView.backgroundColor = UIColor.clearColor;
     objc_setAssociatedObject(web, &playerKey, view, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return true;
 }

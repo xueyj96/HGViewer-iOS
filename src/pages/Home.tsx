@@ -9,7 +9,7 @@ import { useStore } from "../store";
 import { ISearch, IVol, IVolMute } from "../icons";
 
 export default function Home({ active, bottomInset }: { active: boolean; bottomInset: number }) {
-  const { muted, setMuted, setTab, toast, fs, push } = useStore();
+  const { muted, setMuted, setTab, toast, fs } = useStore();
   const [items, setItems] = useState<VideoCard[]>([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -42,9 +42,6 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
   useEffect(() => { if (!items.length) load(1); /* eslint-disable-next-line */ }, []);
 
   const ids = items.map((v) => v.id);
-  const account = isIos && !fs
-    ? <IOSAccountButton onClick={() => push({ kind: "settings" })} overMedia />
-    : null;
 
   return (
     <div className="hg-home-video absolute inset-0 bg-black">
@@ -66,7 +63,7 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
       {lineOpen && <LinePicker open={lineOpen} onClose={() => setLineOpen(false)} />}
 
       {isIos && !fs && (
-        <IOSPageBar label="首页工具" overMedia endAction={account} startAction={<IOSRanksButton overMedia />}>
+        <IOSPageBar label="首页工具" overMedia endAction={<IOSAccountButton overMedia />} startAction={<IOSRanksButton overMedia />}>
           <button type="button" aria-label="搜索" onClick={() => setTab("search")}
             className="flex min-w-0 flex-1 h-11 items-center justify-center gap-2 px-2 text-[13px]">
             <ISearch size={16} />

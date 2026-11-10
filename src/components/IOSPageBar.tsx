@@ -24,12 +24,10 @@ export function IOSBackButton({ onBack, overMedia = false, label = "返回" }: {
   );
 }
 
-export function IOSAccountButton({ onClick, overMedia = false }: {
-  onClick: () => void;
-  overMedia?: boolean;
-}) {
+export function IOSAccountButton({ overMedia = false }: { overMedia?: boolean }) {
+  const { push } = useStore();
   return (
-    <button type="button" onClick={onClick} aria-label="我的"
+    <button type="button" onClick={() => push({ kind: "settings" })} aria-label="我的"
       className={`hg-ios-account grid place-items-center ${overMedia ? "hg-home-account relative size-11" : "hg-ios-header-square hg-ios-floating-button"}`}>
       <IUser size={20} strokeWidth={1.7} />
     </button>

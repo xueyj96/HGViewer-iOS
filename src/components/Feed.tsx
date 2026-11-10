@@ -7,6 +7,7 @@ import { Avatar, CompactAction, Img, PlaybackError, Sheet } from "./ui";
 import VideoSurface, { type VideoHandle } from "./VideoSurface";
 import IOSVideoSurface, { preloadIOSPlayback } from "./IOSVideoSurface";
 import { IOSPageBar } from "./IOSPageBar";
+import { useIOSPlaybackRail } from "./IOSNavigation";
 import { usePlaybackTap } from "./usePlaybackTap";
 import { edgeSwipeSide } from "./edgeSwipe";
 import { QualityRailButton, QualitySheet, type PlaybackQuality } from "./PlaybackQuality";
@@ -36,8 +37,6 @@ type Props = {
   offlineItems?: OfflineEpisode[];
   offlineCoverIds?: number[];
 };
-
-const RATES = [1, 1.25, 1.5, 2];
 
 type Stream = { url: string; watchKey?: number };
 
@@ -193,6 +192,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const episodes = offlineItems
     ? (cachedShow ?? []).map((item) => ({ ep_num: item.ep, title: `第 ${item.ep} 集`, duration: 0, status: 1 }))
     : detail?.episodes || [];
+  const nextConsecutiveEpisode = episodes.find(({ ep_num }) => ep_num === curEp + 1);
   const videoTouchAction = "pan-y";
 
   /* 观看进度按播放项保存，切剧、切集或退出时补写节流期间的最后位置。 */
@@ -401,8 +401,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         }).catch((e) => toast((e as Error).message || "暂时无法保留", "info"));
       } });
     }
-    const next = episodes.find((item) => item.ep_num === curEp + 1);
-    if (next) pickEp(next.ep_num);
+    if (nextConsecutiveEpisode) pickEp(nextConsecutiveEpisode.ep_num);
   };
 
   const retryPlayback = () => {
@@ -433,12 +432,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     setQualityLevel(-1);
     setPanel((current) => current === "quality" ? null : current);
   }, [playKey, retry]);
-
-  /* 音量/静音同步 */
-  useEffect(() => { videoRef.current?.mute(muted); }, [muted]);
-  useEffect(() => { videoRef.current?.volume(volume); }, [volume]);
-  /* 倍速同步（长按 2x / 锁定 2x / 基准倍速） */
-  useEffect(() => { videoRef.current?.rate(effRate); }, [effRate, playKey]);
 
   /* 非激活时暂停 */
   useEffect(() => {
@@ -864,7 +857,44 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     onSeeked: () => setWaiting(false),
     onWaiting: () => setWaiting(true),
     onEnded: onVideoEnded,
+    onQuality: setQuality,
+    onError: setErr,
   };
+  const playbackGestures = {
+    onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => onDown(event),
+    onPointerMove: onMove,
+    onPointerUp: onUp,
+    onPointerCancel: onUp,
+    onLostPointerCapture: onLostCapture,
+  };
+  const railHidden = fullPanel || panel === "quality" || clear;
+  useIOSPlaybackRail(isIos && hasPages && (active || panel === "comments") ? (
+    fs ? (
+      <div className="hg-ios-video-actions hg-ios-full-rail absolute flex flex-col items-center gap-2 pointer-events-auto"
+        hidden={railHidden} inert={railHidden}>
+        {sidebar}
+        <button onClick={() => setFs(false)} aria-label="退出全屏"
+          className="hg-chip-strong hg-ios-full-exit w-9 h-9 rounded-full flex items-center justify-center pressable elev-1">
+          <ICompress size={18} />
+        </button>
+      </div>
+    ) : sidebar.length > 0 ? (
+      <div className="hg-ios-playback-column absolute inset-y-0 pointer-events-none" hidden={railHidden} inert={railHidden}
+        style={{ "--hg-player-bottom-inset": `${bottomInset}px` } as React.CSSProperties}>
+        <div className="hg-ios-video-actions hg-ios-feed-rail no-bar absolute flex flex-col items-center pointer-events-auto"
+          {...playbackGestures}
+          onPointerDown={(e) => onDown(e, true)}
+          onClickCapture={(e) => {
+            if (!railSwipe.current) return;
+            railSwipe.current = false;
+            e.preventDefault();
+            e.stopPropagation();
+          }}>
+          {sidebar}
+        </div>
+      </div>
+    ) : <></>
+  ) : null);
 
   if (!hasPages) {
     return <div className="absolute inset-0 bg-black flex items-center justify-center"><div className="w-9 h-9 spinner" /></div>;
@@ -890,27 +920,24 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             <section key={vid} className="relative w-full h-full snap-start snap-always overflow-hidden">
               {isActive && playUrl ? (
                 <div className="hg-feed-video absolute inset-0" style={{ touchAction: videoTouchAction }}
-                  onPointerDown={(e) => onDown(e)} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onLostPointerCapture={onLostCapture}>
+                  {...playbackGestures}>
                   {isIos ? active && (
                     <IOSVideoSurface key={surfaceKey} ref={videoRef} source={nativeSource} viewport={false} {...playback}
                       autoPlay={playbackIntent.current?.key === surfaceKey ? playbackIntent.current.playing : true}
                       onPlaybackIntentChange={(playing) => { playbackIntent.current = { key: surfaceKey, playing }; }}
                       enterDirection={episodeEntry?.key === playKey ? episodeEntry.direction : undefined}
-                      onEnter={() => setEpisodeEntry(undefined)}
-                      onQuality={setQuality} onError={setErr} />
+                      onEnter={() => setEpisodeEntry(undefined)} />
                   ) : (
                     <VideoSurface key={surfaceKey} ref={videoRef} src={playUrl} poster={posterUrl}
                       autoPlay={active}
-                      fit={isIos || isDesktop || wideVideo ? "contain" : "cover"}
+                      fit={isDesktop || wideVideo ? "contain" : "cover"}
                       onClick={() => { if (isDesktop) videoRef.current?.toggle(); }}
-                      onQuality={setQuality} onError={setErr} {...playback} />
+                      {...playback} />
                   )}
                 </div>
               ) : (
                 <div className="absolute inset-0" style={{ touchAction: videoTouchAction }}
-                  onPointerDown={isActive ? (e) => onDown(e) : undefined} onPointerMove={isActive ? onMove : undefined}
-                  onPointerUp={isActive ? onUp : undefined} onPointerCancel={isActive ? onUp : undefined}
-                  onLostPointerCapture={isActive ? onLostCapture : undefined}>
+                  {...(isActive ? playbackGestures : undefined)}>
                   <Img src={offlineByShow.has(vid) ? offlineCover(vid) : details[vid]?.cover || cards[vid]?.cover || posts[vid]?.cover || ""} raw={offlineByShow.has(vid)} eager={Math.abs(i - index) <= 1} />
                   <div className="absolute inset-0" style={{ background: "rgba(0,0,0,.25)" }} />
                 </div>
@@ -1118,41 +1145,24 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         </IOSPageBar>
       )}
 
-      {isIos && !fs && sidebar.length > 0 && (
-        <div className="hg-ios-playback-column absolute inset-y-0 z-30 pointer-events-none" inert={fullPanel}>
-          <div className="hg-ios-video-actions hg-ios-feed-rail no-bar absolute flex flex-col items-center pointer-events-auto"
-            onPointerDown={(e) => onDown(e, true)} onPointerMove={onMove} onPointerUp={onUp}
-            onPointerCancel={onUp} onLostPointerCapture={onLostCapture}
-            onClickCapture={(e) => {
-              if (!railSwipe.current) return;
-              railSwipe.current = false;
-              e.preventDefault();
-              e.stopPropagation();
-            }}>
-            {sidebar}
-          </div>
-        </div>
-      )}
-
       {/* 桌面控制条 */}
       {isDesktop && (
         <PlayerControls
           paused={paused} time={time} duration={duration} buffered={buffered} rate={rate}
           muted={muted} volume={volume} theater={theater} fullscreen={fullscreen}
           visible={active && !idle}
-          nextDisabled={!episodes.some((e) => e.ep_num === curEp + 1) && index >= videoIds.length - 1}
-          nextTitle={episodes.some((e) => e.ep_num === curEp + 1) ? "下一集 E" : "下一部 ↓"}
+          nextDisabled={!nextConsecutiveEpisode && index >= videoIds.length - 1}
+          nextTitle={nextConsecutiveEpisode ? "下一集 E" : "下一部 ↓"}
           onToggle={() => videoRef.current?.toggle()}
           onSeek={(t) => { videoRef.current?.seek(t); setTime(t); }}
-          onRate={(r) => { setRate(r); videoRef.current?.rate(r); }}
+          onRate={setRate}
           onMute={() => setMuted((m) => !m)}
           onVolume={(v) => setVolume(v)}
           onPip={togglePip}
           onTheater={() => setTheater((v) => !v)}
           onFullscreen={toggleFull}
           onNext={() => {
-            const nx = episodes.find((e) => e.ep_num === curEp + 1);
-            if (nx) pickEp(nx.ep_num);
+            if (nextConsecutiveEpisode) pickEp(nextConsecutiveEpisode.ep_num);
             else go(1);
           }}
         />
@@ -1192,14 +1202,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       {!isDesktop && fs && (
         <>
           {isIos && <div aria-hidden className="hg-ios-full-footer-surface" />}
-          <div className={`absolute z-40 flex items-center gap-2 ${isIos ? "hg-ios-video-actions hg-ios-full-rail flex-col" : "right-3"}`}
-            style={isIos ? undefined : { top: "calc(var(--sat, 0px) + 6px)" }}>
-            {sidebar}
+          {!isIos && <div className="absolute right-3 z-40 flex items-center gap-2" style={{ top: "calc(var(--sat, 0px) + 6px)" }}>
             <button onClick={() => setFs(false)} aria-label="退出全屏"
               className="hg-chip-strong hg-ios-full-exit w-9 h-9 rounded-full flex items-center justify-center pressable elev-1">
               <ICompress size={18} />
             </button>
-          </div>
+          </div>}
           <div className="hg-ios-browse-content absolute inset-x-0 z-40 flex items-center gap-2 px-4"
             style={{ bottom: "calc(var(--sab, 0px) + 10px)" }}>
             <button onClick={() => videoRef.current?.toggle()} aria-label={paused ? "播放" : "暂停"}

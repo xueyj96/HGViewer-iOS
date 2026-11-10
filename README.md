@@ -1,8 +1,8 @@
 # HGViewer iOS
 
-基于 [Minireel/HGhub 1.1.0](https://github.com/Minireel/HGhub/tree/18555dd25bc8cae5c339daeb0325c869207906d9) 的非官方 iOS 衍生版。使用 Tauri 2、React 和 Rust，iOS 播放使用 AVPlayer。此仓库提供构建号 1.1.78 的源码。
+基于 [Minireel/HGhub 1.1.0](https://github.com/Minireel/HGhub/tree/18555dd25bc8cae5c339daeb0325c869207906d9) 的非官方 iOS 衍生版。使用 Tauri 2、React 和 Rust，iOS 播放使用 AVPlayer。已打包的版本见 [GitHub Releases](https://github.com/xueyj96/HGViewer-iOS/releases)。
 
-iOS 支持横竖屏播放、选集、离线缓存和播放记录。本版修复首页时间线及缓存播放切换页面时的顶栏闪烁，并整理导航定义、外观应用时机和 iOS 横屏安全区的代码。
+iOS 支持横竖屏播放、选集、离线缓存和播放记录。当前源码收敛了导航和播放器控制，修复切集时的原生白底闪烁。右侧操作栏在进入或离开播放页时淡入淡出，在播放页之间切换时保持在原位。
 
 ## 本地构建
 
