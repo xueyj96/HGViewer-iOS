@@ -20,6 +20,7 @@ import { ToastHost } from "./components/ui";
 import { DesktopRail, DesktopTitleBar } from "./components/DesktopChrome";
 import ResizeHandles from "./components/ResizeHandles";
 import { useIOSHorizontalInsets } from "./components/useIOSHorizontalInsets";
+import { restoreIOSPlaybackOrientation } from "./components/iosPlaybackOrientation";
 import { WORKSPACE_TABS } from "./workspaceTabs";
 
 const MOBILE_TAB_HEIGHT = isIos ? 50 : 40;
@@ -179,9 +180,14 @@ function AppBody() {
   const reportArticleFullscreen = useCallback((key: string, full: boolean) => {
     setFullscreenArticleKey((current) => full ? key : current === key ? undefined : current);
   }, []);
-  const showingPlayback = !loginOpen && (topPage
-    ? currentPage === "feed" || topPage.key === fullscreenArticleKey
-    : tab === "home");
+  const episodePlaybackRoute = topPage ? currentPage === "feed" : tab === "home";
+  const articleFullscreen = !!topPage && topPage.key === fullscreenArticleKey;
+  const showingPlayback = !loginOpen && (episodePlaybackRoute || articleFullscreen);
+  const playerRoute = episodePlaybackRoute || currentPage === "post";
+  useLayoutEffect(() => {
+    if (isIos && !playerRoute) void restoreIOSPlaybackOrientation().catch(() => {});
+  }, [playerRoute]);
+
   useEffect(() => {
     if (!isIos) return;
     const hideStatusBar = window.matchMedia(showingPlayback
@@ -208,7 +214,7 @@ function AppBody() {
   return (
     <div className="absolute inset-0 flex bg-canvas">
       <div ref={mainRef} className="relative flex-1 min-w-0 overflow-hidden win-main">
-        {isIos ? <IOSNavigation immersive={fs} playbackRoute={topPage ? currentPage === "feed" : tab === "home"}
+        {isIos ? <IOSNavigation immersive={fs} playbackRoute={episodePlaybackRoute}
           bottom={<TabBar overPlayback={showingPlayback} />}>{pages}</IOSNavigation>
           : <>{pages}{!fs && !currentPage && <TabBar />}</>}
       </div>

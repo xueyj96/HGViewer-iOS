@@ -8,6 +8,7 @@ import { IOSBackButton, IOSPageBar } from "../components/IOSPageBar";
 import { browseCoverAttributes, useIOSBrowseCoverMenu } from "../components/IOSCoverMenu";
 import Player from "../components/Player";
 import { preloadIOSPlayback } from "../components/IOSVideoSurface";
+import { restoreIOSPlaybackOrientation } from "../components/iosPlaybackOrientation";
 import { useIOSPageDrag } from "../components/IOSChannelBackFrame";
 import { edgeSwipeSide } from "../components/edgeSwipe";
 import type { VideoHandle } from "../components/VideoSurface";
@@ -232,6 +233,7 @@ export function PostDetail({ id: initialId, postIds, nextPostPage, onBack, activ
   };
   const changeArticle = (next: number, direction: number) => {
     move("article", direction, (animate) => {
+      if (isIos && activeArticle.current === id) void restoreIOSPlaybackOrientation().catch(() => {});
       articleEntry.current = animate ? direction : 0;
       videoTime.current = 0;
       setVideoEntry(undefined);

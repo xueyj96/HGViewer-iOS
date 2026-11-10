@@ -1,4 +1,5 @@
 import type Hls from "hls.js";
+import type { MouseEventHandler } from "react";
 import { ICheck } from "../icons";
 import { CompactAction, Sheet } from "./ui";
 import { IOSCloseButton } from "./IOSPageBar";
@@ -30,7 +31,7 @@ export function trackPlaybackQuality(hls: Hls, events: typeof Hls.Events, update
 }
 
 export function QualityRailButton({ selected, quality, onClick }: {
-  selected: number; quality: PlaybackQuality; onClick: () => void;
+  selected: number; quality: PlaybackQuality; onClick: MouseEventHandler<HTMLButtonElement>;
 }) {
   const level = quality.levels.find((item) => item.index === selected);
   return <button type="button" aria-label="清晰度" onClick={onClick}
@@ -39,14 +40,15 @@ export function QualityRailButton({ selected, quality, onClick }: {
   </button>;
 }
 
-export function QualitySheet({ open, quality, selected, onClose, onSelect }: {
+export function QualitySheet({ open, quality, selected, onClose, onSelect, onPresenceChange }: {
   open: boolean; quality: PlaybackQuality | null; selected: number; onClose: () => void; onSelect: (level: number) => void;
+  onPresenceChange?: (present: boolean) => void;
 }) {
   const levels = quality?.levels || [];
   const current = levels.find((item) => item.index === quality?.current);
   const choices = [{ index: -1, label: "自动" }, ...(levels.length > 1 ? levels : [])];
   return (
-    <Sheet open={open && levels.length > 0} onClose={onClose} z="z-[55]" label="清晰度">
+    <Sheet open={open && levels.length > 0} onClose={onClose} z="z-[55]" label="清晰度" onPresenceChange={onPresenceChange}>
       <div className="hg-ios-browse-content px-4 pb-4">
         <div className="mb-1 flex items-center justify-between">
           <div className="text-sm font-semibold text-on">清晰度</div>

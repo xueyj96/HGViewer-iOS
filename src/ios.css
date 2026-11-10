@@ -264,7 +264,11 @@ html.theme-light .plat-ios {
   }
 
   .plat-ios .hg-ios-navigation :is(.hg-ios-floating-bar-over-media, .hg-tabbar) {
-    transition: opacity 150ms ease, visibility 0s;
+    transition: opacity 160ms ease, visibility 0s;
+  }
+
+  .plat-ios .hg-ios-playback-rail-host {
+    transition: opacity 280ms ease;
   }
 }
 
@@ -978,12 +982,6 @@ html:has(.hg-native-video.is-ready) body,
 
 .plat-ios .hg-ios-playback-rail-host[data-visible="true"] {
   opacity: 1;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .plat-ios .hg-ios-playback-rail-host {
-    transition: opacity 160ms ease;
-  }
 }
 
 .plat-ios .hg-ios-playback-rail-host > [hidden] {

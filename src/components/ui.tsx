@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useIOSPageDrag } from "./IOSChannelBackFrame";
+import { finishMotion } from "./finishMotion";
 import { cover, isIos } from "../api";
 import { useStore } from "../store";
 import { ICheck, IClose, IHeartF, ISparkF, IStarF } from "../icons";
@@ -123,8 +124,9 @@ function keepDialogTab(event: React.KeyboardEvent<HTMLDivElement>) {
 }
 
 /* ——— 底部弹层 ——— */
-export function Sheet({ open, onClose, children, z = "z-40", fullPage, label = fullPage, sharedChrome = false }: {
+export function Sheet({ open, onClose, children, z = "z-40", fullPage, label = fullPage, sharedChrome = false, onPresenceChange }: {
   open: boolean; onClose: () => void; children: React.ReactNode; z?: string; fullPage?: string; label?: string; sharedChrome?: boolean;
+  onPresenceChange?: (present: boolean) => void;
 }) {
   const [render, setRender] = useState(open);
   const [dragDismissed, setDragDismissed] = useState(false);
@@ -134,11 +136,21 @@ export function Sheet({ open, onClose, children, z = "z-40", fullPage, label = f
     onClose();
   });
   useEffect(() => {
-    if (open) { setRender(true); setDragDismissed(false); }
-    else { const t = window.setTimeout(() => setRender(false), 230); return () => window.clearTimeout(t); }
-  }, [open]);
+    if (open) {
+      setRender(true);
+      setDragDismissed(false);
+      return;
+    }
+    if (isIos && onPresenceChange) {
+      return finishMotion(pageRef.current, () => setRender(false));
+    }
+    const timer = window.setTimeout(() => setRender(false), 230);
+    return () => window.clearTimeout(timer);
+  }, [open, onPresenceChange]);
   useDialogFocus(pageRef, !!label && open && render, sharedChrome);
-  if (!render || (!open && dragDismissed)) return null;
+  const present = render && (open || !dragDismissed);
+  useLayoutEffect(() => onPresenceChange?.(present), [onPresenceChange, present]);
+  if (!present) return null;
   return (
     <div className={`absolute inset-0 ${z}`} inert={!open}>
       <div data-dialog-backdrop className={`absolute inset-0 ${open ? "a-fade" : "opacity-0 transition-opacity duration-200"}`}

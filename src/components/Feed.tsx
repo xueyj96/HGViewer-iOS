@@ -98,6 +98,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const cachedEpisodesPage = isIos && !!offlineItems && detailPanel === "episodes";
   const fullDetails = isIos;
   const fullPanel = isIos && (panel === "comments" || activeDetailPanel !== null);
+  const [commentsPresent, setCommentsPresent] = useState(false);
+  const [detailsPresent, setDetailsPresent] = useState(false);
+  const [qualityPresent, setQualityPresent] = useState(false);
+  const railPanelOpener = useRef<HTMLButtonElement | null>(null);
   const [quality, setQuality] = useState<PlaybackQuality | null>(null);
   const [qualityLevel, setQualityLevel] = useState(-1);
   const [descOpen, setDescOpen] = useState(false);
@@ -575,8 +579,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     }, 145);
   };
 
+  const openRailPanel = (next: "comments" | "detail" | "quality", opener: HTMLButtonElement) => {
+    if (isIos) railPanelOpener.current = opener;
+    setPanel(next);
+  };
   const qualityButton = isIos && active && !offlineEpisode && quality && quality.levels.length > 0 && (
-    <QualityRailButton selected={qualityLevel} quality={quality} onClick={() => setPanel("quality")} />
+    <QualityRailButton selected={qualityLevel} quality={quality} onClick={(event) => openRailPanel("quality", event.currentTarget)} />
   );
 
   /* 长按倍速、画面拖动进度和边缘滑动切集。 */
@@ -811,7 +819,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     </button>
   );
   const commentsButton = (
-    <button type="button" onClick={() => setPanel("comments")} className="flex flex-col items-center gap-1 pressable" aria-label="评论">
+    <button type="button" onClick={(event) => openRailPanel("comments", event.currentTarget)} className="flex flex-col items-center gap-1 pressable" aria-label="评论">
       <ICommentF size={26} className="hg-ink hg-ov-shadow" />
       {!isIos && <span className="text-[10.5px] hg-ink-2 hg-ov-shadow">评论</span>}
     </button>
@@ -819,7 +827,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   // Keep the comment opener mounted while its login dialog suspends playback.
   const sidebarButtons = isIos && (active || panel === "comments") ? {
     details: <button type="button" className="hg-ios-media-button items-center pressable"
-      onClick={() => setPanel("detail")} aria-label={kind === "video" ? "剧集详情" : "详情"}>
+      onClick={(event) => openRailPanel("detail", event.currentTarget)} aria-label={kind === "video" ? "剧集详情" : "详情"}>
       <IInfo size={20} aria-hidden="true" />
     </button>,
     favorite: favoriteButton,
@@ -867,7 +875,22 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     onPointerCancel: onUp,
     onLostPointerCapture: onLostCapture,
   };
-  const railHidden = fullPanel || panel === "quality" || clear;
+  const railHidden = fullPanel || commentsPresent || detailsPresent || panel === "quality" || qualityPresent || clear;
+  useEffect(() => {
+    if (!active) {
+      if (!store.loginOpen) railPanelOpener.current = null;
+      return;
+    }
+    if (railHidden || !railPanelOpener.current) return;
+    const frame = requestAnimationFrame(() => {
+      const opener = railPanelOpener.current;
+      railPanelOpener.current = null;
+      if (opener?.isConnected && !opener.closest("[inert]") && document.activeElement === document.body) {
+        opener.focus({ preventScroll: true });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [active, railHidden, store.loginOpen]);
   useIOSPlaybackRail(isIos && hasPages && (active || panel === "comments") ? (
     fs ? (
       <div className="hg-ios-video-actions hg-ios-full-rail absolute flex flex-col items-center gap-2 pointer-events-auto"
@@ -1133,9 +1156,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       </div>
 
       {isIos && !fs && mode === "context" && (
-        <IOSPageBar label={offlineItems ? "离线播放工具" : "播放工具"} onBack={onBack} overMedia endAction={episodes.length > 0 && (
-          <button type="button" aria-label="选集" onClick={() => setPanel("episodes")}
-            className="hg-ios-floating-button hg-ios-header-square hg-ios-media-top-button grid place-items-center">
+        <IOSPageBar label={offlineItems ? "离线播放工具" : "播放工具"} onBack={onBack} overMedia endAction={kind === "video" && (
+          <button type="button" aria-label="选集" disabled={episodes.length === 0} onClick={() => setPanel("episodes")}
+            className="hg-ios-floating-button hg-ios-header-square hg-ios-media-top-button grid place-items-center disabled:opacity-50">
             <IList size={16} aria-hidden="true" />
           </button>
         )}>
@@ -1231,6 +1254,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       )}
 
       <QualitySheet open={panel === "quality"} quality={quality} selected={qualityLevel} onClose={() => setPanel(null)}
+        onPresenceChange={isIos ? setQualityPresent : undefined}
         onSelect={(level) => {
           videoRef.current?.setQuality(level);
           setQualityLevel(level);
@@ -1278,7 +1302,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         </div>
       ) : (
         <>
-          <Sheet open={panel === "comments"} onClose={() => setPanel(null)} sharedChrome={isIos} fullPage={isIos ? "评论" : undefined}>
+          <Sheet open={panel === "comments"} onClose={() => setPanel(null)} sharedChrome={isIos}
+            fullPage={isIos ? "评论" : undefined} onPresenceChange={isIos ? setCommentsPresent : undefined}>
             <div className="flex h-full min-h-0 flex-col" style={isIos ? undefined : { height: "72vh" }}>
               <CommentsPanel key={playKey} videoId={curId} ep={curEp} total={meta.comment} kind={kind}
                 showNavigation={panel === "comments"} onClose={() => setPanel(null)} />
@@ -1293,6 +1318,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           </Sheet>
 
           <Sheet open={activeDetailPanel !== null} onClose={() => setPanel(null)} sharedChrome={isIos}
+            onPresenceChange={isIos ? setDetailsPresent : undefined}
             fullPage={fullDetails ? cachedEpisodesPage ? "已缓存分集" : offlineItems ? "离线剧集详情" : "剧集详情与选集" : undefined}>
             <div className={`hg-ios-show-sheet-content flex min-h-0 flex-col ${isIos ? "hg-ios-detail-page" : ""}`} style={isIos ? undefined : { height: "72vh" }}>
               {!isIos && <div className="flex shrink-0 items-center gap-2 px-4 pb-2">

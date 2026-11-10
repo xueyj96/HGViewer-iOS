@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { finishMotion } from "./finishMotion";
 
 const TopBarHost = createContext<HTMLElement | null>(null);
 const NavigationScope = createContext<{ active: boolean; account?: ReactNode }>({ active: true });
@@ -10,20 +11,19 @@ export function IOSNavigation({ children, bottom, immersive, playbackRoute }: {
 }) {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [rail, setRail] = useState<PlaybackRail | null>(null);
+  const railHost = useRef<HTMLDivElement>(null);
+  const railVisible = playbackRoute && rail?.attached === true;
   useEffect(() => {
-    if (playbackRoute || !rail) return;
-    // Keep the outgoing rail painted long enough to finish its opacity transition.
-    const timer = window.setTimeout(() => setRail((current) => current === rail ? null : current), 180);
-    return () => window.clearTimeout(timer);
-  }, [playbackRoute, rail]);
+    if (railVisible || !rail) return;
+    return finishMotion(railHost.current, () => setRail((current) => current === rail ? null : current));
+  }, [railVisible, rail]);
   return (
     <TopBarHost.Provider value={host}>
       <PlaybackRailHost.Provider value={setRail}>
         <div className="hg-ios-page-layer absolute inset-0 isolate">{children}</div>
       </PlaybackRailHost.Provider>
-      <div className="hg-ios-playback-rail-host hg-player-ui absolute inset-0 z-[34] pointer-events-none"
-        data-visible={playbackRoute && !!rail}
-        inert={!playbackRoute || !rail?.attached}>
+      <div ref={railHost} className="hg-ios-playback-rail-host hg-player-ui absolute inset-0 z-[34] pointer-events-none"
+        data-visible={railVisible} inert={!railVisible}>
         {rail?.content}
       </div>
       <div data-immersive={immersive} className="hg-ios-navigation absolute inset-0 z-[35] pointer-events-none">
