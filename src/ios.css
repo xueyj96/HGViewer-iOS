@@ -196,6 +196,38 @@ html.theme-light .plat-ios {
   display: none;
 }
 
+/* Keep the palette on the fixed host so a newly mounted bar inherits the in-flight colors. */
+@property --ios-top-surface {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
+@property --ios-top-border {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
+@property --ios-top-ink {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: white;
+}
+
+.plat-ios .hg-ios-top-bar {
+  --ios-top-surface: color-mix(in srgb, var(--p-s1) 90%, transparent);
+  --ios-top-border: var(--ios-divider);
+  --ios-top-ink: var(--p-on);
+}
+
+.plat-ios .hg-ios-top-bar:has(> .hg-ios-floating-bar-over-media):not(:has(> [data-overlay="true"])),
+.plat-ios .hg-ios-top-bar:has(> .hg-ios-floating-bar-over-media[data-overlay="true"]) {
+  --ios-top-surface: rgba(20, 20, 23, .72);
+  --ios-top-border: var(--ios-media-border);
+  --ios-top-ink: #fff;
+}
+
 .plat-ios .win-main:has(.player-root.is-clear:not([inert] *)) .hg-ios-navigation :is(.hg-ios-floating-bar-over-media, .hg-tabbar),
 .plat-ios .hg-ios-navigation[data-immersive="true"] .hg-tabbar {
   opacity: 0;
@@ -208,8 +240,12 @@ html.theme-light .plat-ios {
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  .plat-ios .hg-ios-top-bar {
+    transition: --ios-top-surface 200ms ease, --ios-top-border 200ms ease, --ios-top-ink 200ms ease;
+  }
+
   @keyframes hg-ios-top-content-in {
-    from { opacity: .2; }
+    from { opacity: .65; }
     to { opacity: 1; }
   }
 
@@ -263,7 +299,7 @@ html.theme-light .plat-ios {
   z-index: -1;
   border-radius: var(--ios-group-radius);
   background: color-mix(in srgb, var(--p-s1) 90%, transparent);
-  box-shadow: inset 0 0 0 .5px var(--ios-divider);
+  box-shadow: var(--ios-panel-focus-ring, inset 0 0 0 .5px var(--ios-divider));
 }
 
 .plat-ios .hg-ios-floating-bar-fill-trailing .hg-ios-floating-panel::before {
@@ -316,7 +352,7 @@ html.theme-light .plat-ios {
 }
 
 .plat-ios .hg-ios-floating-panel:has(.hg-ios-search-field:focus-within)::before {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--p-primary) 55%, transparent);
+  --ios-panel-focus-ring: inset 0 0 0 1px color-mix(in srgb, var(--p-primary) 55%, transparent);
 }
 
 .plat-ios .hg-ios-floating-button {
@@ -369,6 +405,16 @@ html.theme-light .plat-ios {
 .plat-ios .hg-ios-media-top-button::before {
   background: var(--ios-media-chrome);
   box-shadow: inset 0 0 0 .5px var(--ios-media-border);
+}
+
+.plat-ios .hg-ios-top-bar > .hg-ios-floating-bar,
+.plat-ios .hg-ios-top-bar > .hg-ios-floating-bar :is(.hg-ios-floating-button, .hg-home-account, .hg-ios-search-field input) {
+  color: var(--ios-top-ink);
+}
+
+.plat-ios .hg-ios-top-bar > .hg-ios-floating-bar :is(.hg-ios-floating-panel, .hg-ios-floating-button, .hg-home-account)::before {
+  background: var(--ios-top-surface);
+  box-shadow: var(--ios-panel-focus-ring, inset 0 0 0 .5px var(--ios-top-border));
 }
 
 .plat-ios .hg-ios-search-field input {
@@ -452,7 +498,7 @@ html.theme-light .plat-ios {
   align-items: center;
   justify-content: center;
   padding-inline: var(--ios-control-gap);
-  color: var(--p-on);
+  color: inherit;
   white-space: nowrap;
 }
 

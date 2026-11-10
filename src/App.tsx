@@ -3,7 +3,6 @@ import { useStore, type Page, type Tab } from "./store";
 import { isMobile, isIos, selfTest } from "./api";
 import { addPluginListener, invoke } from "@tauri-apps/api/core";
 import { runBack } from "./back";
-import { IOS_LAYOUT_CHANGE } from "./iosGeometry";
 import OfflinePage from "./pages/Offline";
 import RecentCache from "./pages/RecentCache";
 import Home from "./pages/Home";
@@ -20,6 +19,7 @@ import LoginModal from "./components/LoginModal";
 import { ToastHost } from "./components/ui";
 import { DesktopRail, DesktopTitleBar } from "./components/DesktopChrome";
 import ResizeHandles from "./components/ResizeHandles";
+import { useIOSHorizontalInsets } from "./components/useIOSHorizontalInsets";
 import { WORKSPACE_TABS } from "./workspaceTabs";
 
 const MOBILE_TAB_HEIGHT = isIos ? 50 : 40;
@@ -236,44 +236,7 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
 /* ============ 移动端（无壳） ============ */
 function MobileShell({ children }: { children: React.ReactNode }) {
   const shell = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const element = shell.current;
-    if (!isIos || !element) return;
-    let revision = 0;
-    let timer = 0;
-    const readInsets = () => {
-      const current = ++revision;
-      void invoke<[number, number]>("ios_horizontal_safe_area").then((insets) => {
-        if (current !== revision || !Array.isArray(insets)) return;
-        const [left, right] = insets;
-        if (!Number.isFinite(left) || !Number.isFinite(right)) return;
-        const leftInset = `${Math.max(0, left)}px`;
-        const rightInset = `${Math.max(0, right)}px`;
-        if (element.style.getPropertyValue("--ios-native-safe-left") === leftInset &&
-          element.style.getPropertyValue("--ios-native-safe-right") === rightInset) return;
-        element.style.setProperty("--ios-native-safe-left", leftInset);
-        element.style.setProperty("--ios-native-safe-right", rightInset);
-        window.dispatchEvent(new Event(IOS_LAYOUT_CHANGE));
-      }).catch(() => {});
-    };
-    const update = () => {
-      readInsets();
-      window.clearTimeout(timer);
-      // UIKit can publish its final safe area after the WebView's rotation event.
-      timer = window.setTimeout(readInsets, 350);
-    };
-    update();
-    window.addEventListener("resize", update);
-    window.addEventListener("orientationchange", update);
-    document.addEventListener("visibilitychange", update);
-    return () => {
-      ++revision;
-      window.clearTimeout(timer);
-      window.removeEventListener("resize", update);
-      window.removeEventListener("orientationchange", update);
-      document.removeEventListener("visibilitychange", update);
-    };
-  }, []);
+  useIOSHorizontalInsets(shell);
 
   return (
     <div ref={shell} className={`absolute inset-0 flex flex-col bg-canvas plat-${isIos ? "ios" : "android"}`}

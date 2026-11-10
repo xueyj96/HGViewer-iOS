@@ -1,13 +1,15 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, platform as envPlatform, type OfflineEpisode } from "./api";
 import { isStrictSecurity, setStrictSecurity as setHtmlStrictSecurity } from "./html";
 import { DEFAULT_PLAYBACK_SIDEBAR, normalizePlaybackSidebar, type PlaybackSidebarItem } from "./playbackSidebar";
 import type { User } from "./types";
+import type { Tab } from "./workspaceTabs";
+
+export type { Tab } from "./workspaceTabs";
 
 export type Platform = typeof envPlatform;
 export type Theme = "dark" | "light";
 export type ThemePreference = Theme | "system";
-export type Tab = "home" | "search" | "category" | "profile";
 
 /** 播放页上下文：ids 是来源列表，index 是当前条目。 */
 export type FeedContext = {
@@ -171,7 +173,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => appearance.removeEventListener("change", update);
   }, []);
 
-  useEffect(() => { applyTheme(theme); }, [theme]);
+  useLayoutEffect(() => { applyTheme(theme); }, [theme]);
 
   useEffect(() => {
     try { localStorage.setItem("hghub_theme", themePreference); } catch { /* ignore */ }

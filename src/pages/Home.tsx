@@ -68,7 +68,7 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
       {isIos && !fs && (
         <IOSPageBar label="首页工具" overMedia endAction={account} startAction={<IOSRanksButton overMedia />}>
           <button type="button" aria-label="搜索" onClick={() => setTab("search")}
-            className="flex min-w-0 flex-1 h-11 items-center justify-center gap-2 px-2 text-[13px] text-white/80">
+            className="flex min-w-0 flex-1 h-11 items-center justify-center gap-2 px-2 text-[13px]">
             <ISearch size={16} />
             <span className="truncate">搜索短剧、作者、题材…</span>
           </button>

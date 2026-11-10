@@ -9,3 +9,5 @@ export const WORKSPACE_TABS = [
   { k: "category", label: "分类", Icon: IGrid, SelectedIcon: IGridF },
   { k: "profile", label: "资料库", Icon: IList, SelectedIcon: IList },
 ] as const;
+
+export type Tab = (typeof WORKSPACE_TABS)[number]["k"];
