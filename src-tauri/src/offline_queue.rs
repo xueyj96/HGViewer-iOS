@@ -1,8 +1,10 @@
+use super::transfer::{FailureReason, TransferFailure};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     path::Path,
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 pub(super) const MAX_DOWNLOADS: usize = 4;
@@ -41,6 +43,41 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+#[derive(Clone, Default)]
+struct TransferRate(VecDeque<(Instant, u64)>);
+
+impl TransferRate {
+    const WINDOW: Duration = Duration::from_secs(3);
+
+    fn record(&mut self, now: Instant, bytes: u64) {
+        while self
+            .0
+            .front()
+            .is_some_and(|(start, _)| now.duration_since(*start) >= Self::WINDOW)
+        {
+            self.0.pop_front();
+        }
+        match self.0.back_mut() {
+            Some((start, count)) if now.duration_since(*start) < Duration::from_millis(500) => {
+                *count += bytes;
+            }
+            _ => self.0.push_back((now, bytes)),
+        }
+    }
+
+    fn per_second(&self, now: Instant) -> u64 {
+        let mut recent = self
+            .0
+            .iter()
+            .filter(|(start, _)| now.duration_since(*start) < Self::WINDOW);
+        let Some((start, first)) = recent.next() else {
+            return 0;
+        };
+        let bytes = first + recent.map(|(_, count)| count).sum::<u64>();
+        (bytes as f64 / now.duration_since(*start).as_secs_f64().max(1.0)) as u64
+    }
+}
+
 #[derive(Clone, Default, Serialize)]
 pub(super) struct Job {
     pub running: bool,
@@ -53,13 +90,47 @@ pub(super) struct Job {
     pub ep: u32,
     pub done: usize,
     pub total: usize,
-    #[serde(skip)]
     pub transfer_done: u64,
-    #[serde(skip)]
     pub transfer_total: u64,
+    bytes_per_second: u64,
+    #[serde(skip)]
+    rate: TransferRate,
     pub message: String,
     pub watch_key: Option<u64>,
     pub needs_fill: bool,
+    #[serde(skip)]
+    pub resource_retries: u64,
+    #[serde(skip)]
+    pub resource_retry_reason: Option<FailureReason>,
+    #[serde(skip)]
+    pub worker_id: u64,
+    #[serde(skip)]
+    pub reused_bytes: u64,
+    #[serde(skip)]
+    pub network_bytes: u64,
+    #[serde(skip)]
+    pub resume_capture_after_stop: bool,
+}
+
+impl Job {
+    pub fn record_network_bytes(&mut self, bytes: usize) {
+        self.network_bytes += bytes as u64;
+        self.rate.record(Instant::now(), bytes as u64);
+    }
+
+    fn snapshot(&self) -> Self {
+        let mut snapshot = self.clone();
+        if self.running && !self.stopping && self.message.is_empty() {
+            snapshot.bytes_per_second = self.rate.per_second(Instant::now());
+        }
+        snapshot
+    }
+
+    pub fn reset_transfer(&mut self) {
+        self.transfer_done = 0;
+        self.transfer_total = 0;
+        self.rate.0.clear();
+    }
 }
 
 impl Entry {
@@ -105,7 +176,13 @@ pub(super) struct Pending {
     pub limit: usize,
     #[serde(default = "default_segment_limit")]
     pub segments: usize,
+    #[serde(default = "default_allow_background")]
+    pub allow_background: bool,
     pub entries: Vec<Entry>,
+}
+
+fn default_allow_background() -> bool {
+    true
 }
 
 impl Default for Pending {
@@ -113,6 +190,7 @@ impl Default for Pending {
         Self {
             limit: 2,
             segments: default_segment_limit(),
+            allow_background: default_allow_background(),
             entries: Vec::new(),
         }
     }
@@ -149,7 +227,7 @@ impl Pending {
         let path = root.join("download-queue.json");
         let temp = root.join("download-queue.tmp");
         let result =
-            serde_json::to_vec(&serde_json::json!({ "limit": self.limit, "segments": self.segments, "entries": entries }))
+            serde_json::to_vec(&serde_json::json!({ "limit": self.limit, "segments": self.segments, "allow_background": self.allow_background, "entries": entries }))
                 .map_err(std::io::Error::other)
                 .and_then(|raw| std::fs::write(&temp, raw))
                 .and_then(|_| std::fs::rename(&temp, path));
@@ -185,6 +263,7 @@ pub(super) struct Queue {
     pub pending: Pending,
     pub active: BTreeMap<i64, RunningJob>,
     pub last: Option<Job>,
+    pub backgrounded: bool,
     completed: u64,
     pub interrupted: u64,
     failed: u64,
@@ -204,11 +283,32 @@ impl Queue {
     #[cfg(any(target_os = "ios", test))]
     pub fn interrupt_background(&mut self, root: &Path) -> Result<(), String> {
         self.pending.entries.retain(|entry| entry.capture.is_none());
+        self.pause_for_foreground(root)
+    }
+
+    #[cfg(any(target_os = "ios", test))]
+    pub fn enter_background(&mut self, root: &Path) -> Result<bool, String> {
+        self.backgrounded = true;
+        if self.pending.allow_background || self.pending.entries.iter().all(|entry| entry.paused) {
+            return Ok(false);
+        }
+        self.pause_for_foreground(root)?;
+        Ok(true)
+    }
+
+    #[cfg(any(target_os = "ios", test))]
+    fn pause_for_foreground(&mut self, root: &Path) -> Result<(), String> {
         for entry in &mut self.pending.entries {
             if !entry.paused {
                 entry.paused = true;
                 entry.resume_in_foreground = true;
                 entry.message = BACKGROUND_INTERRUPTED.into();
+                if entry.capture.is_some() {
+                    if let Some(job) = self.active.get(&entry.id) {
+                        let mut job = job.lock().unwrap();
+                        job.resume_capture_after_stop = !job.stopping;
+                    }
+                }
             }
         }
         for job in self.active.values() {
@@ -219,6 +319,7 @@ impl Queue {
 
     #[cfg(any(target_os = "ios", test))]
     pub fn resume_foreground(&mut self, root: &Path) -> Result<bool, String> {
+        self.backgrounded = false;
         if !self
             .pending
             .entries
@@ -287,6 +388,9 @@ impl Queue {
     }
 
     pub fn reserve(&mut self) -> Vec<(Entry, RunningJob)> {
+        if self.backgrounded && !self.pending.allow_background {
+            return Vec::new();
+        }
         let available = self.pending.limit.saturating_sub(self.active.len());
         let mut reserved = Vec::new();
         for entry in self.pending.entries.iter().filter(|entry| !entry.paused) {
@@ -298,6 +402,12 @@ impl Queue {
             }
             let mut job = entry.job();
             job.running = true;
+            job.resume_capture_after_stop = false;
+            job.reused_bytes = 0;
+            job.network_bytes = 0;
+            job.resource_retries = 0;
+            job.resource_retry_reason = None;
+            job.worker_id = super::diagnostics::worker_id();
             job.queued = false;
             let job = Arc::new(Mutex::new(job));
             self.active.insert(entry.id, job.clone());
@@ -313,12 +423,18 @@ impl Queue {
             .map(|entry| {
                 self.active
                     .get(&entry.id)
-                    .map_or_else(|| entry.job(), |job| job.lock().unwrap().clone())
+                    .map_or_else(|| entry.job(), |job| job.lock().unwrap().snapshot())
             })
             .collect()
     }
 
-    pub fn finish(&mut self, root: &Path, entry: Entry, mut job: Job, result: Result<(), String>) {
+    pub fn finish(
+        &mut self,
+        root: &Path,
+        entry: Entry,
+        mut job: Job,
+        result: Result<(), TransferFailure>,
+    ) {
         self.active.remove(&entry.id);
         job.running = false;
         let stopped = job.stopping;
@@ -327,9 +443,14 @@ impl Queue {
         if !complete && !stopped && !job.needs_fill {
             self.failed += 1;
         }
+        let can_retry = cfg!(any(target_os = "ios", test))
+            && result
+                .as_ref()
+                .is_err_and(|error| error.retry_after.is_some());
+        job.reset_transfer();
         job.message = match result {
             Ok(()) => "缓存完成".into(),
-            Err(error) => error,
+            Err(error) => error.message,
         };
         if let Some(current) = self
             .pending
@@ -337,10 +458,12 @@ impl Queue {
             .iter_mut()
             .find(|current| current.id == entry.id)
         {
-            if current.capture.is_none() && !complete {
+            if !complete && (current.capture.is_none() || stopped && job.resume_capture_after_stop)
+            {
                 self.interrupted += 1;
                 if !stopped {
                     current.paused = true;
+                    current.resume_in_foreground = can_retry;
                     current.message = job.message.clone();
                 }
                 current.previous = Some(job.clone());
@@ -357,8 +480,14 @@ impl Queue {
         }
         if let Err(error) = self.pending.persist(root) {
             self.failed += 1;
+            super::diagnostics::record(
+                root,
+                "queue_persist_failed",
+                serde_json::json!({"operation": "finish"}),
+            );
             job.message = error;
-        } else if stopped && entry.capture.is_none() && !complete {
+        } else if stopped && !complete && (entry.capture.is_none() || job.resume_capture_after_stop)
+        {
             job.message.clear();
         }
         self.last = Some(job);
@@ -379,13 +508,12 @@ mod tests {
     }
 
     fn temp_root() -> std::path::PathBuf {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap();
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT_ROOT: AtomicUsize = AtomicUsize::new(0);
         let root = std::env::temp_dir().join(format!(
             "hg-queue-{}-{}",
             std::process::id(),
-            now.as_nanos()
+            NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir(&root).unwrap();
         root
@@ -401,6 +529,7 @@ mod tests {
         .unwrap();
         let mut pending = Pending::read(&root);
         assert_eq!((pending.limit, pending.segments), (1, 3));
+        assert!(pending.allow_background);
         assert_eq!(pending.entries[0].episodes, Some(BTreeSet::from([2])));
         pending.segments = 4;
         pending.persist(&root).unwrap();
@@ -510,6 +639,118 @@ mod tests {
         };
         assert!(restored.resume_foreground(&root).unwrap());
         assert_eq!(restored.reserve()[0].0.id, 4);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn exhausted_transient_failure_is_retried_on_foreground() {
+        let root = temp_root();
+        let mut queue = Queue::default();
+        queue
+            .change(&root, |pending| pending.add(entry(1, &[1, 2])))
+            .unwrap();
+        let (work, job) = queue.reserve().pop().unwrap();
+        let mut progress = job.lock().unwrap().clone();
+        progress.done = 1;
+        progress.transfer_done = 8;
+        progress.transfer_total = 10;
+        queue.finish(
+            &root,
+            work,
+            progress,
+            Err(TransferFailure::transient("网络中断", Duration::ZERO)),
+        );
+        assert!(queue.reserve().is_empty());
+        assert_eq!(queue.jobs()[0].transfer_done, 0);
+        assert!(Pending::read(&root).entries[0].resume_in_foreground);
+
+        queue.pending = Pending::read(&root);
+        assert!(queue.resume_foreground(&root).unwrap());
+        assert_eq!(queue.reserve()[0].0.id, 1);
+        assert!(!queue.resume_foreground(&root).unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn transfer_rate_counts_network_bytes_and_decays_after_stall() {
+        let start = Instant::now();
+        let mut rate = TransferRate::default();
+        rate.record(start, 1024);
+        rate.record(start + Duration::from_millis(250), 512);
+        rate.record(start + Duration::from_secs(1), 512);
+        assert_eq!(rate.per_second(start + Duration::from_secs(2)), 1024);
+        assert_eq!(rate.per_second(start + Duration::from_secs(4)), 0);
+        rate.record(start + Duration::from_secs(8), 512);
+        assert_eq!(rate.per_second(start + Duration::from_secs(9)), 512);
+    }
+
+    #[test]
+    fn foreground_only_downloads_pause_and_reopen_without_resuming_manual_pauses() {
+        let root = temp_root();
+        let mut queue = Queue::default();
+        queue
+            .change(&root, |pending| {
+                pending.add(entry(1, &[1]))?;
+                let mut manual = entry(2, &[1]);
+                manual.paused = true;
+                pending.add(manual)?;
+                let mut capture = entry(3, &[1]);
+                capture.capture = Some(Capture {
+                    key: 1,
+                    fill: false,
+                });
+                pending.add(capture)
+            })
+            .unwrap();
+        let mut workers = queue.reserve().into_iter();
+        let (regular, first) = workers.next().unwrap();
+        let (capture, second) = workers.next().unwrap();
+        assert!(!queue.enter_background(&root).unwrap());
+        assert!(!first.lock().unwrap().stopping);
+
+        queue
+            .change(&root, |pending| {
+                pending.allow_background = false;
+                Ok(())
+            })
+            .unwrap();
+        assert!(queue.enter_background(&root).unwrap());
+        assert!(first.lock().unwrap().stopping);
+        assert!(second.lock().unwrap().stopping);
+        assert!(!Pending::read(&root).allow_background);
+        assert!(queue.reserve().is_empty());
+        queue.finish(
+            &root,
+            regular,
+            first.lock().unwrap().clone(),
+            Err("已停止缓存".into()),
+        );
+        queue
+            .change(&root, |pending| pending.add(entry(4, &[1])))
+            .unwrap();
+        assert!(
+            queue.reserve().is_empty(),
+            "new workers must wait in the background"
+        );
+
+        // Foreground may resume the queue before the interrupted capture has finished unwinding.
+        assert!(queue.resume_foreground(&root).unwrap());
+        queue.finish(
+            &root,
+            capture,
+            second.lock().unwrap().clone(),
+            Err("已停止缓存".into()),
+        );
+        assert_eq!(
+            queue
+                .reserve()
+                .iter()
+                .map(|(entry, _)| entry.id)
+                .collect::<Vec<_>>(),
+            [1, 3]
+        );
+        assert!(queue.jobs().iter().find(|job| job.id == 2).unwrap().paused);
+        assert_eq!(queue.background_snapshot().failed, 0);
         std::fs::remove_dir_all(root).unwrap();
     }
 

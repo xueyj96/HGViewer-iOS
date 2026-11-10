@@ -67,10 +67,11 @@ export type OfflineEpisode = { id: number; ep: number; title: string; bytes: num
 export type RecentPlayback = { key: number; id: number; ep: number; title: string; bytes: number; needs_fill?: boolean };
 export type OfflineJob = {
   id: number; title: string; cover?: string | null; ep: number; done: number; total: number; message: string;
+  transfer_done?: number; transfer_total?: number; bytes_per_second?: number;
   running: boolean; queued: boolean; paused: boolean; stopping: boolean; watch_key?: number | null; needs_fill?: boolean;
 };
-export type DownloadSettings = { limit: number; segments: number };
-export type DownloadBackground = "unsupported" | "idle" | "waiting" | "running" | "unavailable" | "expired";
+export type DownloadSettings = { limit: number; segments: number; allow_background: boolean; background_supported: boolean };
+export type DownloadBackground = "disabled" | "unsupported" | "idle" | "waiting" | "running" | "unavailable" | "expired";
 export type OfflineState = {
   items: OfflineEpisode[]; bytes: number; shows: Record<number, { episodes: number[]; cover: boolean }>;
   recent: RecentPlayback[];
@@ -138,8 +139,10 @@ export const api = {
   offlineCancel: (id: number) => call<void>("offline_cancel", { id }),
   offlineResume: (id: number) => call<void>("offline_resume", { id }),
   offlineBackgroundStart: () => call<void>("offline_background_start"),
-  offlineDownloadSettings: (changes?: Partial<DownloadSettings>) =>
-    call<DownloadSettings>("offline_download_settings", { limit: changes?.limit ?? null, segments: changes?.segments ?? null }),
+  offlineDownloadSettings: (changes?: Partial<Omit<DownloadSettings, "background_supported">>) =>
+    call<DownloadSettings>("offline_download_settings", {
+      limit: changes?.limit ?? null, segments: changes?.segments ?? null, allowBackground: changes?.allow_background ?? null,
+    }),
   offlineDelete: (id: number, ep?: number) => call<void>("offline_delete", { id, ep: ep ?? null }),
   clearCache: () => invoke<void>("cache_clear"),
   netDiag: () => invoke<Record<string, unknown>>("net_diag"),

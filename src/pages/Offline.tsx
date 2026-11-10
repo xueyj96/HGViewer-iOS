@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { api, isIos, offlineCover } from "../api";
 import { IChevR, IClock, IDownload, IRefresh, ITrash } from "../icons";
-import { CachedEpisodeMark, CompactDownloadButton, DownloadProgressCard, downloadFraction, downloadStatus } from "../components/DownloadControls";
+import { CompactDownloadButton, DownloadProgressCard, EpisodeDownloadLabel, downloadFraction, downloadSpeed, downloadStatus, episodeDownloadPercent } from "../components/DownloadControls";
 import { ShowCoverCard, ShowCoverGrid } from "../components/ShowCoverGrid";
 import { useIOSCoverMenu, type DownloadAction } from "../components/IOSCoverMenu";
 import { useOfflineStatus } from "../components/useOfflineStatus";
@@ -157,6 +157,7 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
   const cacheSummary = state && (id === undefined ? "缓存占用"
     : episodes !== undefined ? `已缓存 ${cachedCount} / ${options.length} 集`
     : `已缓存 ${saved.length}${show ? ` / ${allEpisodes.length}` : ""} 集`);
+  const speed = downloadSpeed(detailJob);
   const cacheBytes = state && (id === undefined ? state.bytes
     : episodes === undefined ? saved.reduce((sum, item) => sum + item.bytes, 0) : undefined);
   const rawJobMessage = detailJob?.message || (!detailJob && last &&
@@ -180,9 +181,12 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
     <div className="space-y-2">
       {(cacheSummary || selectingEpisodes || detailProgress || cacheError || jobMessage) && (
         <section aria-label="缓存信息" className={`flex flex-col gap-1 ${cacheCard}`}>
-          {(cacheSummary || selectingEpisodes) && <div className="flex min-h-9 items-center justify-between gap-2 px-2 text-xs tabular-nums">
-            <span className="font-semibold text-on">{cacheSummary}</span>
-            {cacheBytes !== undefined && <span className="text-mut">{cacheSize(cacheBytes)}</span>}
+          {(cacheSummary || selectingEpisodes) && <div className="flex min-h-9 flex-wrap items-center justify-between gap-2 px-2 text-xs tabular-nums">
+            <span className="whitespace-nowrap">
+              <span className="font-semibold text-on">{cacheSummary}</span>
+              {speed && <span className="ml-2 text-mut">{speed}</span>}
+            </span>
+            {cacheBytes !== undefined && <span className="shrink-0 text-mut">{cacheSize(cacheBytes)}</span>}
             {selectingEpisodes && <div className="ml-auto flex shrink-0 flex-wrap justify-end gap-1">
               {cacheWholeShow}
               {backgroundAction}
@@ -200,9 +204,13 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
         <section aria-label="分集" className={`hg-ios-cache-episodes grid grid-cols-3 gap-[var(--ios-control-gap,8px)] ${cacheCard}`}>
           {options.map((ep) => {
             const cached = savedEpisodes.has(ep);
-            return <button key={ep} className={`${button} inline-flex items-center justify-center gap-1 ${isIos ? "min-h-11" : ""}`} disabled={!state || detailEnqueueBlocked || cached}
+            const percent = cached ? undefined : episodeDownloadPercent(detailJob, ep);
+            return <button type="button" key={ep} className={`${button} relative inline-flex overflow-hidden items-center justify-center gap-1 ${isIos ? "min-h-11" : ""}`} disabled={!state || detailEnqueueBlocked || cached}
               onClick={() => cacheEpisode(id, ep)}
-              aria-label={cached ? `第 ${ep} 集已缓存` : `缓存第 ${ep} 集`}>第 {ep} 集{cached && <CachedEpisodeMark />}</button>;
+              aria-label={cached ? `第 ${ep} 集已缓存` : `缓存第 ${ep} 集`}
+              aria-description={percent !== undefined ? `已下载 ${percent}%` : undefined}>
+              <EpisodeDownloadLabel ep={ep} cached={cached} percent={percent} />
+            </button>;
           })}
         </section>
       </section>}
@@ -239,12 +247,13 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
               <ShowCoverCard key={videoId} title={coverTitle(videoId)}
                 cover={localCover ? offlineCover(videoId) : cardJob?.cover || undefined}
                 local={localCover}
-                badge={cardJob && (cardJob.queued || isPaused) ? downloadStatus(cardJob) : undefined}
+                badge={cardJob?.queued ? downloadStatus(cardJob) : undefined}
                 menu={isIos ? { id: videoId, download: menu.action, downloadBlocked: menu.blocked } : undefined}
                 progress={cardJob && !cardJob.queued ? {
                   fraction: downloadFraction(cardJob),
                   label: downloadStatus(cardJob),
                   paused: isPaused,
+                  speed: downloadSpeed(cardJob),
                 } : undefined}
                 onClick={() => {
                   if (isIos && groups.get(videoId)?.length) playCachedShow(videoId);
@@ -283,10 +292,11 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
           <section aria-label="分集" className={`hg-ios-cache-episodes grid grid-cols-3 gap-[var(--ios-control-gap,8px)] ${cacheCard}`}>
             {allEpisodes.map((ep) => {
               const cached = savedEpisodes.has(ep);
+              const percent = cached ? undefined : episodeDownloadPercent(detailJob, ep);
               return <button type="button" key={ep} data-hg-menu-card={cached ? id : undefined} data-hg-menu-episode={cached ? ep : undefined}
-                className="inline-flex min-h-11 items-center justify-center gap-1 rounded-(--r-sm) bg-s3 text-xs font-semibold text-on pressable disabled:opacity-50"
+                className="relative inline-flex min-h-11 items-center justify-center gap-1 overflow-hidden rounded-(--r-sm) bg-s3 text-xs font-semibold text-on pressable disabled:opacity-50"
                 aria-label={cached ? `播放第 ${ep} 集，已缓存` : `缓存第 ${ep} 集，未缓存`}
-                aria-description={cached && isIos ? "长按可删除缓存" : undefined}
+                aria-description={cached && isIos ? "长按可删除缓存" : percent !== undefined ? `已下载 ${percent}%` : undefined}
                 disabled={!cached && detailEnqueueBlocked}
                 onContextMenu={(event) => {
                   if (!cached || !canDeleteEpisode) return;
@@ -296,7 +306,9 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
                 onClick={() => {
                   if (!cached) cacheEpisode(id, ep);
                   else playCachedShow(id, ep);
-                }}>第 {ep} 集{cached && <CachedEpisodeMark />}</button>;
+                }}>
+                <EpisodeDownloadLabel ep={ep} cached={cached} percent={percent} />
+              </button>;
             })}
           </section>
         </>

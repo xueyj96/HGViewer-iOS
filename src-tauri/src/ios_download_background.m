@@ -8,6 +8,9 @@ enum {
 };
 
 static _Atomic int status = HGUnsupported;
+extern void hg_download_foreground(void);
+extern void hg_download_enter_background(void);
+extern int hg_download_background_allowed(void);
 
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 260000
 typedef struct {
@@ -20,7 +23,12 @@ typedef struct {
 
 extern void hg_download_snapshot(HGDownloadSnapshot *snapshot);
 extern void hg_download_expired(void);
-extern void hg_download_foreground(void);
+extern void hg_download_log(int event, int64_t code);
+
+enum {
+    HGLogRegistered = 1, HGLogRegistrationFailed, HGLogSubmissionFailed, HGLogRunning,
+    HGLogExpiredActive, HGLogExpiredInactive, HGLogFinished,
+};
 
 API_AVAILABLE(ios(26.0))
 @interface HGDownloadLease : NSObject
@@ -72,6 +80,7 @@ static HGDownloadLease *lease API_AVAILABLE(ios(26.0));
         } else if (self.task) {
             self.task.progress.completedUnitCount = self.task.progress.totalUnitCount;
         }
+        hg_download_log(HGLogFinished, success);
         [self finish:HGIdle success:success];
         return;
     }
@@ -89,7 +98,8 @@ static HGDownloadLease *lease API_AVAILABLE(ios(26.0));
 
 static void hg_request_lease(void) API_AVAILABLE(ios(26.0));
 static void hg_request_lease(void) {
-    if (lease || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
+    if (lease || !hg_download_background_allowed() ||
+        UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
     HGDownloadSnapshot snapshot = {0};
     hg_download_snapshot(&snapshot);
     if (!snapshot.remaining) return;
@@ -112,6 +122,10 @@ static void hg_request_lease(void) {
             return;
         }
         running.task = (BGContinuedProcessingTask *)task;
+        if (!hg_download_background_allowed()) {
+            [running finish:HGIdle success:YES];
+            return;
+        }
         __weak HGDownloadLease *weakRunning = running;
         task.expirationHandler = ^{
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -120,22 +134,29 @@ static void hg_request_lease(void) {
                 [expired update];
                 if (expired.finished) return;
                 BOOL foreground = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
-                if (!foreground) hg_download_expired();
+                hg_download_log(foreground ? HGLogExpiredActive : HGLogExpiredInactive, 0);
+                if (!foreground) {
+                    if (hg_download_background_allowed()) hg_download_expired();
+                    else hg_download_enter_background();
+                }
                 [expired.task updateTitle:@"HGViewer 后台下载"
                                  subtitle:foreground ? @"下载在 App 内继续" : @"后台已中断，回 App 自动继续"];
                 [expired finish:foreground ? HGIdle : HGExpired success:NO];
             });
         };
         atomic_store(&status, HGRunning);
+        hg_download_log(HGLogRunning, 0);
         [running update];
     }];
     if (!registered) {
         atomic_store(&status, HGUnavailable);
+        hg_download_log(HGLogRegistrationFailed, 0);
         return;
     }
 
     lease = current;
     atomic_store(&status, HGWaiting);
+    hg_download_log(HGLogRegistered, 0);
     __weak HGDownloadLease *weakCurrent = current;
     current.timer = [NSTimer timerWithTimeInterval:1.0 repeats:YES block:^(__unused NSTimer *timer) {
         [weakCurrent update];
@@ -155,7 +176,10 @@ static void hg_request_lease(void) {
                         if (!error) [scheduler cancelTaskRequestWithIdentifier:identifier];
                         return;
                     }
-                    if (error && !submitted.task) [submitted finish:HGUnavailable success:NO];
+                    if (error && !submitted.task) {
+                        hg_download_log(HGLogSubmissionFailed, error.code);
+                        [submitted finish:HGUnavailable success:NO];
+                    }
                 });
             }];
         });
@@ -164,27 +188,50 @@ static void hg_request_lease(void) {
 #endif
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    if (![scheduler submitTaskRequest:request error:NULL]) [current finish:HGUnavailable success:NO];
+    NSError *error = nil;
+    if (![scheduler submitTaskRequest:request error:&error]) {
+        hg_download_log(HGLogSubmissionFailed, error.code);
+        [current finish:HGUnavailable success:NO];
+    }
 #pragma clang diagnostic pop
 }
 #endif
 
-void hg_observe_download_foreground(void) {
+static void hg_resume_downloads(void) {
+    hg_download_foreground();
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 260000
-    if (@available(iOS 26.0, *)) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
-                object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
-                    hg_download_foreground();
-                    hg_request_lease();
-                }];
-            if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
-                hg_download_foreground();
-                hg_request_lease();
-            }
-        });
-    }
+    if (@available(iOS 26.0, *)) hg_request_lease();
 #endif
+}
+
+void hg_observe_download_foreground(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
+            object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
+                hg_resume_downloads();
+            }];
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification
+            object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
+                hg_download_enter_background();
+            }];
+        UIApplicationState state = UIApplication.sharedApplication.applicationState;
+        if (state == UIApplicationStateActive) hg_resume_downloads();
+        else if (state == UIApplicationStateBackground) hg_download_enter_background();
+    });
+}
+
+void hg_refresh_download_background_policy(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (UIApplication.sharedApplication.applicationState == UIApplicationStateBackground) {
+            hg_download_enter_background();
+        }
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 260000
+        if (@available(iOS 26.0, *)) {
+            if (hg_download_background_allowed()) hg_request_lease();
+            else [lease finish:HGIdle success:YES];
+        }
+#endif
+    });
 }
 
 int hg_download_status(void) {

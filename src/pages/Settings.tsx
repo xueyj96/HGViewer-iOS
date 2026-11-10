@@ -48,7 +48,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [downloads, setDownloads] = useState<DownloadSettings>();
-  const [savingLimit, setSavingLimit] = useState(false);
+  const [savingDownloads, setSavingDownloads] = useState(false);
   const [diagnosis, setDiagnosis] = useState<{ status: "loading" | "failed" } | { status: "ready"; text: string } | null>(null);
   const [diagnosisOpen, setDiagnosisOpen] = useState(false);
 
@@ -63,14 +63,14 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
     api.offlineDownloadSettings().then(setDownloads).catch(() => toast("无法读取下载设置", "info"));
   }, [toast]);
 
-  const changeDownloadSettings = async (changes: Partial<DownloadSettings>) => {
-    setSavingLimit(true);
+  const changeDownloadSettings = async (changes: Partial<Omit<DownloadSettings, "background_supported">>) => {
+    setSavingDownloads(true);
     try {
       setDownloads(await api.offlineDownloadSettings(changes));
     } catch (error) {
       toast((error as Error).message || "无法保存下载设置", "info");
     } finally {
-      setSavingLimit(false);
+      setSavingDownloads(false);
     }
   };
 
@@ -162,12 +162,27 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
           {isIos && <Section title="播放"><PlaybackSidebarSettings /></Section>}
 
           {isIos && <Section title="下载">
+              <div className="flex items-center gap-3 px-3.5 py-3">
+                <span aria-hidden="true" className="grid size-8 shrink-0 place-items-center rounded-full bg-s3 text-primary">
+                  {symbol("arrow.down.circle", <IDownload size={16} />)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12.5px] text-on">允许后台下载</div>
+                  <div className="text-[10.5px] text-mut">
+                    {downloads?.background_supported === false ? "需要 iOS 26 或更新版本" : "关闭后，回到 App 时继续下载"}
+                  </div>
+                </div>
+                <Toggle label="允许后台下载"
+                  on={!!downloads?.background_supported && downloads.allow_background}
+                  disabled={!downloads?.background_supported || savingDownloads}
+                  onChange={(allow_background) => void changeDownloadSettings({ allow_background })} />
+              </div>
               <DownloadSettingRow label="同时下载数" description="其余作品按加入顺序排队" unit="部"
                 icon={symbol("arrow.down.circle", <IDownload size={16} />)}
-                value={downloads?.limit} disabled={savingLimit} onChange={(limit) => void changeDownloadSettings({ limit })} />
+                value={downloads?.limit} disabled={savingDownloads} onChange={(limit) => void changeDownloadSettings({ limit })} />
               <DownloadSettingRow label="单集分片并发" description="仅 HLS，下一个下载的集数生效" unit="路"
                 icon={symbol("bolt", <IBoltF size={16} />)}
-                value={downloads?.segments} disabled={savingLimit} onChange={(segments) => void changeDownloadSettings({ segments })} />
+                value={downloads?.segments} disabled={savingDownloads} onChange={(segments) => void changeDownloadSettings({ segments })} />
           </Section>}
 
           <Section title="本地数据">

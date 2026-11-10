@@ -6,6 +6,7 @@ static APP: OnceLock<AppHandle> = OnceLock::new();
 
 extern "C" {
     fn hg_request_background_download();
+    fn hg_refresh_download_background_policy();
     fn hg_observe_download_foreground();
     fn hg_download_status() -> std::ffi::c_int;
 }
@@ -18,6 +19,24 @@ pub fn bind(app: &AppHandle) {
 
 pub fn request() {
     unsafe { hg_request_background_download() };
+}
+
+pub fn refresh_policy() {
+    unsafe { hg_refresh_download_background_policy() };
+}
+
+#[no_mangle]
+extern "C" fn hg_download_background_allowed() -> std::ffi::c_int {
+    i32::from(APP.get().is_some_and(|app| {
+        crate::offline::background_allowed(&app.state::<crate::offline::Cache>())
+    }))
+}
+
+#[no_mangle]
+extern "C" fn hg_download_enter_background() {
+    if let Some(app) = APP.get() {
+        crate::offline::enter_background(&app.state::<crate::offline::Cache>());
+    }
 }
 
 pub fn status() -> &'static str {
@@ -51,5 +70,23 @@ extern "C" fn hg_download_expired() {
 extern "C" fn hg_download_foreground() {
     if let Some(app) = APP.get() {
         crate::offline::resume_foreground(app);
+    }
+}
+
+#[no_mangle]
+extern "C" fn hg_download_log(event: std::ffi::c_int, code: i64) {
+    let (name, detail) = match event {
+        1 => ("background_registered", None),
+        2 => ("background_registration_failed", None),
+        3 => ("background_submission_failed", Some(code)),
+        4 => ("background_running", None),
+        5 => ("background_expired_active", None),
+        6 => ("background_expired_inactive", None),
+        7 if code == 1 => ("background_finished", None),
+        7 => ("background_failed", None),
+        _ => return,
+    };
+    if let Some(app) = APP.get() {
+        crate::offline::log_background(&app.state::<crate::offline::Cache>(), name, detail);
     }
 }

@@ -596,7 +596,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     const width = isIos ? bounds.width || 1 : el.clientWidth || 1;
     const x = e.clientX - bounds.left;
     const y = e.clientY - bounds.top;
-    const side = isIos && kind === "video" && episodes.length > 1
+    const side = isIos && kind === "video" && currentEpisodeIndex >= 0
       ? rail ? 1 : edgeSwipeSide(x, width, boxRef.current ?? undefined)
       : 0;
     if (rail && !side) return;
@@ -661,7 +661,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (g.mode === "episode") {
       const distance = Math.max(0, -dx * g.side);
       const target = g.side < 0 ? previousEpisode : nextEpisode;
-      const offset = -g.side * (target ? Math.min(distance, g.width * 0.85) : offlineItems ? 0 : 36 * distance / (distance + 85));
+      const travel = target
+        ? Math.min(distance, g.width * 0.85)
+        : 36 * distance / (distance + 85);
+      const offset = -g.side * travel;
       if (offset !== g.edgePull) {
         g.edgePull = offset;
         videoRef.current?.pullEdge?.(offset, "horizontal");

@@ -15,6 +15,31 @@ export function CachedEpisodeMark() {
   return <ICheck size={12} className="shrink-0 text-primary" aria-hidden="true" />;
 }
 
+export function episodeDownloadPercent(job: OfflineJob | undefined, ep: number) {
+  if (!job?.running || job.stopping || job.message || job.ep !== ep || !job.transfer_total) return undefined;
+  return Math.min(99, Math.max(0, Math.floor((job.transfer_done ?? 0) * 100 / job.transfer_total)));
+}
+
+export function EpisodeDownloadLabel({ ep, cached, percent }: {
+  ep: number; cached: boolean; percent?: number;
+}) {
+  return <>
+    {percent !== undefined && percent > 0 && <span aria-hidden="true"
+      className="pointer-events-none absolute inset-y-0 left-0 rounded-l-[inherit] bg-primary/25 motion-safe:transition-[width] motion-safe:duration-200"
+      style={{ width: `${percent}%` }} />}
+    <span className="relative">第 {ep} 集</span>
+    {cached && <CachedEpisodeMark />}
+  </>;
+}
+
+export function downloadSpeed(job?: OfflineJob) {
+  if (!job?.running || job.stopping) return undefined;
+  const bytesPerSecond = job.bytes_per_second ?? 0;
+  return bytesPerSecond >= 1048576
+    ? `${(bytesPerSecond / 1048576).toFixed(1)} MB/s`
+    : `${Math.round(bytesPerSecond / 1024)} KB/s`;
+}
+
 export function downloadStatus(job: OfflineJob) {
   if (job.stopping) return job.watch_key != null ? "正在停止" : "正在暂停";
   if (job.paused) return "已暂停";
@@ -23,17 +48,17 @@ export function downloadStatus(job: OfflineJob) {
 }
 
 export function downloadFraction(job: OfflineJob) {
-  if (job.total > 0 && job.done > 0) return job.done / job.total;
+  const episode = episodeDownloadPercent(job, job.ep);
+  if (job.total > 0 && (job.done > 0 || episode !== undefined)) {
+    return Math.min(1, (job.done + (episode ?? 0) / 100) / job.total);
+  }
   return job.running && !job.stopping ? undefined : 0;
 }
 
-export function DownloadTrack({ fraction, muted, onCover = false }: {
-  fraction?: number; muted: boolean; onCover?: boolean;
-}) {
-  return <span aria-hidden="true"
-    className={`block overflow-hidden ${onCover ? "absolute inset-x-0 bottom-0 h-[3px] bg-black/45" : "h-1.5 w-full rounded-full bg-s3"}`}>
-    <span className={`block h-full rounded-full ${muted ? onCover ? "bg-white/75" : "bg-mut" : "bg-primary"} ${fraction === undefined && !muted ? "motion-safe:animate-pulse" : ""}`}
-      style={{ width: fraction === undefined ? "25%" : `${Math.max(0, Math.min(1, fraction)) * 100}%` }} />
+function DownloadTrack({ fraction, muted }: { fraction?: number; muted: boolean }) {
+  return <span aria-hidden="true" className="block h-1.5 w-full overflow-hidden rounded-full bg-s3">
+    <span className={`block h-full rounded-full ${muted ? "bg-mut" : "bg-primary"} ${fraction === undefined && !muted ? "motion-safe:animate-pulse" : ""}`}
+      style={{ width: fraction === undefined ? "25%" : `${fraction * 100}%` }} />
   </span>;
 }
 

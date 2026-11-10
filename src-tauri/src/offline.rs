@@ -6,13 +6,16 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::Mutex,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::http::{header, Response};
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncSeekExt},
 };
+
+#[path = "offline_diagnostics.rs"]
+mod diagnostics;
 
 #[path = "offline_queue.rs"]
 mod queue;
@@ -24,7 +27,9 @@ use queue::{Capture, Entry, Job, Pending, Queue, RunningJob, MAX_DOWNLOADS, MAX_
 mod transfer;
 #[cfg(test)]
 use transfer::{best_variant, save_mp4};
-use transfer::{save_video, wait_to_retry, TransferFailure, TransferOptions};
+use transfer::{
+    save_video, wait_to_retry, FailureReason, TransferFailure, TransferOptions, HLS_CHECKPOINT,
+};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Episode {
@@ -125,8 +130,9 @@ impl Cache {
             return;
         }
         let _ = std::fs::remove_dir_all(root.join(".partial"));
-        let _ = std::fs::remove_dir_all(root.join(".partials"));
-        self.queue.lock().unwrap().pending = Pending::read(&root);
+        let pending = Pending::read(&root);
+        prune_staging(&root, &pending);
+        self.queue.lock().unwrap().pending = pending;
         *self.root.lock().unwrap() = Some(root);
     }
 
@@ -229,7 +235,11 @@ pub fn offline_status(cache: tauri::State<'_, Cache>) -> Result<serde_json::Valu
         (queue.jobs(), queue.last.clone())
     };
     #[cfg(target_os = "ios")]
-    let background = crate::ios_download_background::status();
+    let background = if background_allowed(&cache) {
+        crate::ios_download_background::status()
+    } else {
+        "disabled"
+    };
     #[cfg(not(target_os = "ios"))]
     let background = "unsupported";
     Ok(serde_json::json!({
@@ -244,16 +254,54 @@ pub fn background_snapshot(cache: &Cache) -> BackgroundSnapshot {
 }
 
 #[cfg(target_os = "ios")]
+pub fn log_background(cache: &Cache, event: &'static str, code: Option<i64>) {
+    if let Ok(root) = cache.root() {
+        let snapshot = background_snapshot(cache);
+        diagnostics::record(
+            &root,
+            event,
+            serde_json::json!({
+                "scheduler_code": code,
+                "remaining": snapshot.remaining,
+                "completed": snapshot.completed,
+                "interrupted": snapshot.interrupted,
+                "failed": snapshot.failed,
+            }),
+        );
+    }
+}
+
+#[cfg(target_os = "ios")]
+pub fn background_allowed(cache: &Cache) -> bool {
+    cache.queue.lock().unwrap().pending.allow_background
+}
+
+#[cfg(target_os = "ios")]
+pub fn enter_background(cache: &Cache) {
+    if let Ok(root) = cache.root() {
+        let suspended = cache.queue.lock().unwrap().enter_background(&root);
+        match suspended {
+            Ok(true) => log_background(cache, "background_paused_by_preference", None),
+            Ok(false) => {}
+            Err(_) => diagnostics::record(
+                &root,
+                "queue_persist_failed",
+                serde_json::json!({"operation": "background_preference_pause"}),
+            ),
+        }
+    }
+}
+
+#[cfg(target_os = "ios")]
 pub fn pause_background(cache: &Cache) {
     if let Ok(root) = cache.root() {
-        if cache
-            .queue
-            .lock()
-            .unwrap()
-            .interrupt_background(&root)
-            .is_err()
-        {
-            eprintln!("无法保存后台下载的暂停状态");
+        let result = cache.queue.lock().unwrap().interrupt_background(&root);
+        if result.is_err() {
+            diagnostics::record(
+                &root,
+                "queue_persist_failed",
+                serde_json::json!({"operation": "background_pause"}),
+            );
         }
     }
 }
@@ -265,17 +313,31 @@ pub fn resume_foreground(app: &tauri::AppHandle) {
     let Ok(root) = cache.root() else { return };
     let resumed = cache.queue.lock().unwrap().resume_foreground(&root);
     match resumed {
-        Ok(true) => fill_slots(app),
-        Ok(false) => {}
-        Err(error) => eprintln!("{error}"),
+        Ok(resumed) => {
+            if resumed {
+                log_background(&cache, "foreground_resumed", None);
+            }
+            fill_slots(app);
+        }
+        Err(_) => diagnostics::record(
+            &root,
+            "queue_persist_failed",
+            serde_json::json!({"operation": "foreground_resume"}),
+        ),
     }
 }
 
 #[tauri::command]
 pub fn offline_background_start(cache: tauri::State<'_, Cache>) -> Result<(), String> {
-    if cache.queue.lock().unwrap().background_snapshot().remaining == 0 {
+    let queue = cache.queue.lock().unwrap();
+    #[cfg(target_os = "ios")]
+    if !queue.pending.allow_background {
+        return Err("请在设置中开启允许后台下载".into());
+    }
+    if queue.background_snapshot().remaining == 0 {
         return Err("没有待后台下载的任务".into());
     }
+    drop(queue);
     #[cfg(target_os = "ios")]
     {
         if crate::ios_download_background::status() == "unsupported" {
@@ -296,6 +358,7 @@ pub fn offline_stop(cache: tauri::State<'_, Cache>, id: i64) -> Result<(), Strin
         let mut job = job.lock().unwrap();
         if job.watch_key.is_some() {
             job.stopping = true;
+            job.resume_capture_after_stop = false;
         }
     } else {
         let queued = queue
@@ -343,6 +406,12 @@ pub fn offline_pause(cache: tauri::State<'_, Cache>, id: i64) -> Result<(), Stri
     if queued {
         queue.interrupted += 1;
     }
+    let worker = queue
+        .active
+        .get(&id)
+        .map(|job| job.lock().unwrap().worker_id);
+    drop(queue);
+    diagnostics::record(&root, "user_paused", serde_json::json!({"worker": worker}));
     Ok(())
 }
 
@@ -367,9 +436,23 @@ pub fn offline_cancel(cache: tauri::State<'_, Cache>, id: i64) -> Result<(), Str
             job.stopping = true;
         }
     }
+    if !queue.active.contains_key(&id) && !queue.pending.entries.iter().any(|entry| entry.id == id)
+    {
+        discard_staging(&root, id);
+    }
     if canceled {
         queue.interrupted += 1;
     }
+    let worker = queue
+        .active
+        .get(&id)
+        .map(|job| job.lock().unwrap().worker_id);
+    drop(queue);
+    diagnostics::record(
+        &root,
+        "user_canceled",
+        serde_json::json!({"worker": worker}),
+    );
     Ok(())
 }
 
@@ -407,6 +490,7 @@ pub fn offline_delete(
             pending.entries.retain(|entry| entry.id != id);
             Ok(())
         })?;
+        discard_staging(&root, id);
     }
     Ok(())
 }
@@ -504,6 +588,8 @@ pub fn offline_resume(
 pub struct DownloadSettings {
     limit: usize,
     segments: usize,
+    allow_background: bool,
+    background_supported: bool,
 }
 
 #[tauri::command]
@@ -512,6 +598,7 @@ pub fn offline_download_settings(
     cache: tauri::State<'_, Cache>,
     limit: Option<usize>,
     segments: Option<usize>,
+    allow_background: Option<bool>,
 ) -> Result<DownloadSettings, String> {
     if limit.is_some_and(|value| !(1..=MAX_DOWNLOADS).contains(&value)) {
         return Err("同时下载数必须在 1 到 4 之间".into());
@@ -521,7 +608,7 @@ pub fn offline_download_settings(
     }
     let settings = {
         let mut queue = cache.queue.lock().unwrap();
-        if limit.is_some() || segments.is_some() {
+        if limit.is_some() || segments.is_some() || allow_background.is_some() {
             let root = cache.root()?;
             queue.change(&root, |pending| {
                 if let Some(limit) = limit {
@@ -530,14 +617,26 @@ pub fn offline_download_settings(
                 if let Some(segments) = segments {
                     pending.segments = segments;
                 }
+                if let Some(allow_background) = allow_background {
+                    pending.allow_background = allow_background;
+                }
                 Ok(())
             })?;
         }
         DownloadSettings {
             limit: queue.pending.limit,
             segments: queue.pending.segments,
+            allow_background: queue.pending.allow_background,
+            #[cfg(target_os = "ios")]
+            background_supported: crate::ios_download_background::status() != "unsupported",
+            #[cfg(not(target_os = "ios"))]
+            background_supported: false,
         }
     };
+    #[cfg(target_os = "ios")]
+    if allow_background.is_some() {
+        crate::ios_download_background::refresh_policy();
+    }
     if limit.is_some() {
         fill_slots(&app);
     }
@@ -599,29 +698,85 @@ pub fn fill_slots(app: &tauri::AppHandle) {
         let root = root.clone();
         tauri::async_runtime::spawn(async move {
             let cache = app.state::<Cache>();
+            let initial = job.lock().unwrap().clone();
+            let started = Instant::now();
+            let record = |event, progress: &Job, failure: Option<&TransferFailure>| {
+                diagnostics::worker(
+                    &root,
+                    event,
+                    progress,
+                    started.elapsed().as_millis(),
+                    failure.map(diagnostics::Failure::from),
+                );
+            };
+            record("worker_started", &initial, None);
             let attempt = || async {
                 let result = download_entry(&app, &cache, &job, &root, &entry).await;
-                let _ = fs::remove_dir_all(stage_path(&root, entry.id)).await;
+                let stage = stage_path(&root, entry.id);
+                if entry.capture.is_some() || !stage.join(HLS_CHECKPOINT).is_file() {
+                    if let Err(error) = fs::remove_dir_all(&stage).await {
+                        if error.kind() != std::io::ErrorKind::NotFound {
+                            let progress = job.lock().unwrap().clone();
+                            record(
+                                "staging_cleanup_failed",
+                                &progress,
+                                Some(&TransferFailure::storage(error)),
+                            );
+                        }
+                    }
+                }
                 result
             };
             let result = if entry.capture.is_none() {
-                retry_download(&job, attempt).await
+                retry_download(&job, attempt, |error| {
+                    let progress = job.lock().unwrap().clone();
+                    if !progress.stopping {
+                        record("worker_retry", &progress, Some(error));
+                    }
+                })
+                .await
             } else {
                 attempt().await
-            }
-            .map_err(|error| error.message);
-            {
+            };
+            let (event, outcome, failure) = {
                 let mut queue = cache.queue.lock().unwrap();
                 let mut outcome = job.lock().unwrap().clone();
                 if let Some(key) = outcome.watch_key {
-                    outcome.needs_fill =
-                        result.as_ref().err().map(String::as_str) == Some(watch::MISSING);
+                    outcome.needs_fill = result
+                        .as_ref()
+                        .is_err_and(|error| error.message == watch::MISSING);
                     if outcome.needs_fill {
                         watch::needs_fill(key);
                     }
                 }
-                queue.finish(&root, entry, outcome, result);
-            }
+                let event = if result.is_ok() {
+                    "worker_completed"
+                } else if outcome.stopping {
+                    "worker_stopped"
+                } else if outcome.needs_fill {
+                    "worker_needs_fill"
+                } else {
+                    "worker_failed"
+                };
+                let failure = result
+                    .as_ref()
+                    .err()
+                    .filter(|_| !outcome.stopping)
+                    .map(diagnostics::Failure::from);
+                let id = entry.id;
+                queue.finish(&root, entry, outcome.clone(), result);
+                if !queue.pending.entries.iter().any(|entry| entry.id == id) {
+                    discard_staging(&root, id);
+                }
+                (event, outcome, failure)
+            };
+            diagnostics::worker(
+                &root,
+                event,
+                &outcome,
+                started.elapsed().as_millis(),
+                failure,
+            );
             fill_slots(&app);
         });
     }
@@ -647,14 +802,23 @@ pub fn watch_save(
     )
 }
 
-async fn retry_download<F, Fut>(job: &Mutex<Job>, attempt: F) -> Result<(), TransferFailure>
+async fn retry_download<F, Fut>(
+    job: &Mutex<Job>,
+    attempt: F,
+    on_retry: impl FnOnce(&TransferFailure),
+) -> Result<(), TransferFailure>
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = Result<(), TransferFailure>>,
 {
     match attempt().await {
         Err(error) if error.retry_after.is_some() => {
-            job.lock().unwrap().message = "网络暂时中断，正在准备重试".into();
+            on_retry(&error);
+            {
+                let mut job = job.lock().unwrap();
+                job.reset_transfer();
+                job.message = "网络暂时中断，正在准备重试".into();
+            }
             wait_to_retry(
                 job,
                 Duration::from_secs(3).max(error.retry_after.unwrap_or_default()),
@@ -667,12 +831,27 @@ where
     }
 }
 
-fn download_api_failure(reason: String, message: String) -> TransferFailure {
-    if net::retryable_edge_error(&reason) {
+fn download_api_failure(reason: String, message: String, stage: &'static str) -> TransferFailure {
+    let code = reason
+        .strip_prefix("HTTP ")
+        .and_then(|value| value.parse::<u16>().ok())
+        .map_or_else(
+            || match reason.as_str() {
+                "请求超时" => FailureReason::Timeout,
+                reason if reason.starts_with("error sending request") => FailureReason::Connection,
+                reason if reason.starts_with("error decoding response body") => {
+                    FailureReason::BodyInterrupted
+                }
+                _ => FailureReason::Other,
+            },
+            FailureReason::Http,
+        );
+    let failure = if net::retryable_edge_error(&reason) {
         TransferFailure::transient(&message, Duration::ZERO)
     } else {
         message.into()
-    }
+    };
+    failure.with_reason(code).at(stage)
 }
 
 async fn download_entry(
@@ -684,7 +863,11 @@ async fn download_entry(
 ) -> Result<(), TransferFailure> {
     use tauri::Manager;
     if let Some(capture) = entry.capture {
-        let source = watch::source(capture.key).ok_or("这集的临时缓存已清理，请从选集重新缓存")?;
+        let source = watch::source(capture.key).ok_or_else(|| {
+            TransferFailure::from("这集的临时缓存已清理，请从选集重新缓存")
+                .with_reason(FailureReason::CaptureUnavailable)
+                .at("recent_playback")
+        })?;
         {
             let mut progress = job.lock().unwrap();
             progress.ep = source.ep;
@@ -703,6 +886,7 @@ async fn download_entry(
             TransferOptions {
                 capture: Some(capture),
                 segments,
+                ..TransferOptions::default()
             },
         )
         .await?;
@@ -729,6 +913,35 @@ fn stage_path(root: &Path, id: i64) -> PathBuf {
     root.join(".partials").join(id.to_string())
 }
 
+fn discard_staging(root: &Path, id: i64) {
+    if let Err(error) = std::fs::remove_dir_all(stage_path(root, id)) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            diagnostics::record(
+                root,
+                "staging_cleanup_failed",
+                serde_json::json!({"operation": "discard"}),
+            );
+        }
+    }
+}
+
+fn prune_staging(root: &Path, pending: &Pending) {
+    let Ok(stages) = std::fs::read_dir(root.join(".partials")) else {
+        return;
+    };
+    for stage in stages.flatten() {
+        let path = stage.path();
+        let queued = stage
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<i64>().ok())
+            .is_some_and(|id| pending.entries.iter().any(|entry| entry.id == id));
+        if !queued || !path.join(HLS_CHECKPOINT).is_file() {
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
+}
+
 async fn commit_episode(
     job: &Mutex<Job>,
     root: &Path,
@@ -744,10 +957,22 @@ async fn commit_episode(
         return Ok(());
     }
     let stage = stage_path(root, id);
-    fs::create_dir_all(root.join(".partials"))
-        .await
-        .map_err(storage_error)?;
-    fs::create_dir(&stage).await.map_err(storage_error)?;
+    let options = TransferOptions {
+        resume_episode: options.capture.is_none().then_some(ep),
+        ..options
+    };
+    if options.resume_episode.is_some() {
+        fs::create_dir_all(&stage)
+            .await
+            .map_err(TransferFailure::storage)?;
+    } else {
+        fs::create_dir_all(root.join(".partials"))
+            .await
+            .map_err(TransferFailure::storage)?;
+        fs::create_dir(&stage)
+            .await
+            .map_err(TransferFailure::storage)?;
+    }
     let (bytes, mp4) = save_video(job, &stage, url, origin, options).await?;
     check_job(job)?;
     let info = Episode {
@@ -757,13 +982,20 @@ async fn commit_episode(
         bytes,
         mp4,
     };
-    let json = serde_json::to_vec(&info).map_err(|_| "无法保存缓存信息")?;
+    let json = serde_json::to_vec(&info)
+        .map_err(|_| TransferFailure::from("无法保存缓存信息").at("storage"))?;
     fs::write(stage.join("info.json"), json)
         .await
-        .map_err(storage_error)?;
-    fs::rename(&stage, &dest)
-        .await
-        .map_err(|_| "无法完成缓存".into())
+        .map_err(TransferFailure::storage)?;
+    fs::rename(&stage, &dest).await.map_err(|error| {
+        let mut failure = TransferFailure::storage(error);
+        failure.message = "无法完成缓存".into();
+        failure
+    })?;
+    if options.resume_episode.is_some() {
+        let _ = fs::remove_file(dest.join(HLS_CHECKPOINT)).await;
+    }
+    Ok(())
 }
 
 async fn run(
@@ -778,7 +1010,9 @@ async fn run(
     check_job(job)?;
     let detail = net::edge(origin, "GET", &format!("/api/videos/{id}"), None, token)
         .await
-        .map_err(|reason| download_api_failure(reason, "无法读取选集，请检查线路".into()))?;
+        .map_err(|reason| {
+            download_api_failure(reason, "无法读取选集，请检查线路".into(), "episode_list")
+        })?;
     let title = detail
         .get("title")
         .and_then(|v| v.as_str())
@@ -798,7 +1032,7 @@ async fn run(
         })
         .collect::<Vec<_>>();
     if episodes.is_empty() {
-        return Err("没有可缓存的集数".into());
+        return Err(TransferFailure::from("没有可缓存的集数").at("episode_list"));
     }
     let remaining: Vec<_> = episodes
         .iter()
@@ -810,8 +1044,7 @@ async fn run(
         job.total = episodes.len();
         job.done = episodes.len() - remaining.len();
         job.ep = 0;
-        job.transfer_done = 0;
-        job.transfer_total = 0;
+        job.reset_transfer();
         job.title = title.clone();
         job.cover = detail
             .get("cover")
@@ -825,18 +1058,25 @@ async fn run(
         let data = net::episode_playback(origin, id, ep, token)
             .await
             .map_err(|reason| {
-                download_api_failure(reason, format!("第 {ep} 集取不到播放地址，请检查线路"))
+                download_api_failure(
+                    reason,
+                    format!("第 {ep} 集取不到播放地址，请检查线路"),
+                    "episode_source",
+                )
             })?;
         let url = ["video_url", "video_url_hevc"]
             .into_iter()
             .filter_map(|field| data.get(field).and_then(|v| v.as_str()))
             .map(str::trim)
             .find(|url| !url.is_empty())
-            .ok_or_else(|| format!("第 {ep} 集没有可缓存的播放地址"))?;
+            .ok_or_else(|| {
+                TransferFailure::from(format!("第 {ep} 集没有可缓存的播放地址"))
+                    .at("episode_source")
+            })?;
         let segments = cache.queue.lock().unwrap().pending.segments;
         let options = TransferOptions {
-            capture: None,
             segments,
+            ..TransferOptions::default()
         };
         commit_episode(job, root, id, ep, &title, url, origin, options)
             .await
@@ -981,15 +1221,19 @@ mod tests {
     async fn retries_transient_download_failure_only_once() {
         let job = Mutex::new(Job::default());
         let attempts = std::sync::atomic::AtomicUsize::new(0);
-        let result = retry_download(&job, || async {
-            let attempt = attempts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let message = if attempt == 0 {
-                "网络中断"
-            } else {
-                "网络仍未恢复"
-            };
-            Err(TransferFailure::transient(message, Duration::ZERO))
-        })
+        let result = retry_download(
+            &job,
+            || async {
+                let attempt = attempts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let message = if attempt == 0 {
+                    "网络中断"
+                } else {
+                    "网络仍未恢复"
+                };
+                Err(TransferFailure::transient(message, Duration::ZERO))
+            },
+            |_| {},
+        )
         .await;
         assert_eq!(result.unwrap_err().message, "网络仍未恢复");
         assert_eq!(attempts.load(std::sync::atomic::Ordering::Relaxed), 2);
@@ -998,19 +1242,27 @@ mod tests {
     #[tokio::test]
     async fn retry_respects_manual_stop_and_permanent_errors() {
         let job = Mutex::new(Job::default());
-        let result = retry_download(&job, || async {
-            assert!(!job.lock().unwrap().stopping);
-            job.lock().unwrap().stopping = true;
-            Err(TransferFailure::transient("网络中断", Duration::ZERO))
-        })
+        let result = retry_download(
+            &job,
+            || async {
+                assert!(!job.lock().unwrap().stopping);
+                job.lock().unwrap().stopping = true;
+                Err(TransferFailure::transient("网络中断", Duration::ZERO))
+            },
+            |_| {},
+        )
         .await;
         assert_eq!(result.unwrap_err().message, "已停止缓存");
 
         let job = Mutex::new(Job::default());
-        let result = retry_download(&job, || async {
-            assert!(job.lock().unwrap().message.is_empty());
-            Err("设备存储空间不足".into())
-        })
+        let result = retry_download(
+            &job,
+            || async {
+                assert!(job.lock().unwrap().message.is_empty());
+                Err("设备存储空间不足".into())
+            },
+            |_| {},
+        )
         .await;
         assert_eq!(result.unwrap_err().message, "设备存储空间不足");
     }
@@ -1215,6 +1467,159 @@ mod tests {
             b"#EXTM3U"
         );
         fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "uses a local HTTP fixture and temporarily disables the global network guard; run alone"]
+    async fn hls_checkpoint_replays_only_missing_segments_after_rebind() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        for playlist_changed in [false, true] {
+            let root = std::env::temp_dir().join(format!(
+                "hg-hls-resume-{}-{playlist_changed}",
+                std::process::id()
+            ));
+            let cache = Cache::default();
+            cache.bind(root.clone());
+            network_policy::bind_security(&root);
+            network_policy::set_strict_security(false).unwrap();
+            cache
+                .queue
+                .lock()
+                .unwrap()
+                .change(&root, |pending| {
+                    pending.add(Entry::new(
+                        12,
+                        "Fixture".into(),
+                        Some(BTreeSet::from([1])),
+                        None,
+                    ))
+                })
+                .unwrap();
+            let stage = stage_path(&root, 12);
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let origin = format!("http://{}", listener.local_addr().unwrap());
+            let manifests = Arc::new(AtomicUsize::new(0));
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let server = {
+                let stage = stage.clone();
+                let requests = requests.clone();
+                tokio::spawn(async move {
+                    loop {
+                        let (mut socket, _) = listener.accept().await.unwrap();
+                        let stage = stage.clone();
+                        let manifests = manifests.clone();
+                        let requests = requests.clone();
+                        tokio::spawn(async move {
+                            let mut request = Vec::new();
+                            while !request.ends_with(b"\r\n\r\n") {
+                                request.push(socket.read_u8().await.unwrap());
+                            }
+                            let request = String::from_utf8(request).unwrap();
+                            let target = request.split_whitespace().nth(1).unwrap().to_owned();
+                            let attempt = if target == "/index.m3u8" {
+                                manifests.fetch_add(1, Ordering::SeqCst)
+                            } else {
+                                manifests.load(Ordering::SeqCst) - 1
+                            };
+                            requests.lock().unwrap().push((attempt, target.clone()));
+                            let (status, body) = match target.as_str() {
+                                "/index.m3u8" => {
+                                    let query = if attempt > 0 && playlist_changed {
+                                        "?revision=2"
+                                    } else {
+                                        ""
+                                    };
+                                    ("200 OK", format!("#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\na.ts\n#EXTINF:1,\nb.ts{query}\n#EXT-X-ENDLIST\n").into_bytes())
+                                }
+                                "/a.ts" if attempt == 0 => {
+                                    // A slow first segment must not block the second from reaching disk.
+                                    tokio::time::timeout(Duration::from_secs(2), async {
+                                        while !stage.join("1.ts").is_file() {
+                                            tokio::time::sleep(Duration::from_millis(10)).await;
+                                        }
+                                    })
+                                    .await
+                                    .unwrap();
+                                    ("404 Not Found", Vec::new())
+                                }
+                                "/a.ts" => ("200 OK", vec![0x47; 188]),
+                                "/b.ts" => ("200 OK", vec![0x47; 376]),
+                                "/b.ts?revision=2" => ("200 OK", vec![0x47; 564]),
+                                _ => panic!("unexpected fixture request"),
+                            };
+                            socket.write_all(format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
+                            socket.write_all(&body).await.unwrap();
+                        });
+                    }
+                })
+            };
+            let options = TransferOptions {
+                segments: 2,
+                ..TransferOptions::default()
+            };
+            let url = format!("{origin}/index.m3u8");
+            let job = Mutex::new(Job::default());
+            let failed = tokio::time::timeout(
+                Duration::from_secs(4),
+                commit_episode(&job, &root, 12, 1, "Fixture", &url, &origin, options),
+            )
+            .await
+            .unwrap()
+            .unwrap_err();
+            assert!(matches!(failed.reason, FailureReason::Http(404)));
+            assert!(!path(&root, 12, 1).exists());
+            assert_eq!(fs::metadata(stage.join("1.ts")).await.unwrap().len(), 376);
+            fs::write(stage.join("0.ts"), [0x47]).await.unwrap();
+            let orphan = stage_path(&root, 13);
+            fs::create_dir_all(&orphan).await.unwrap();
+            fs::write(orphan.join(HLS_CHECKPOINT), [0; 32])
+                .await
+                .unwrap();
+
+            let reopened = Cache::default();
+            reopened.bind(root.clone());
+            assert!(stage.join("1.ts").is_file());
+            assert!(!orphan.exists());
+            let resumed = Mutex::new(Job::default());
+            tokio::time::timeout(
+                Duration::from_secs(4),
+                commit_episode(&resumed, &root, 12, 1, "Fixture", &url, &origin, options),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(
+                resumed.lock().unwrap().reused_bytes,
+                if playlist_changed { 0 } else { 376 }
+            );
+            let mut second_attempt: Vec<_> = requests
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(attempt, _)| *attempt == 1)
+                .map(|(_, target)| target.clone())
+                .collect();
+            second_attempt.sort();
+            if playlist_changed {
+                assert_eq!(second_attempt, ["/a.ts", "/b.ts?revision=2", "/index.m3u8"]);
+            } else {
+                assert_eq!(second_attempt, ["/a.ts", "/index.m3u8"]);
+            }
+            server.abort();
+            let playlist = serve(&reopened, "/offline/12/1/index.m3u8", None).await;
+            let body = String::from_utf8(playlist.into_body()).unwrap();
+            assert!(body.find("0.ts").unwrap() < body.find("1.ts").unwrap());
+            let second = serve(&reopened, "/offline/12/1/1.ts", None).await;
+            assert_eq!(
+                second.into_body().len(),
+                if playlist_changed { 564 } else { 376 }
+            );
+            assert!(!stage.exists());
+            assert!(!path(&root, 12, 1).join(HLS_CHECKPOINT).exists());
+            fs::remove_dir_all(root).await.unwrap();
+        }
     }
 
     #[tokio::test]
