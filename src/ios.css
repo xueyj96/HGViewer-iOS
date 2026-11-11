@@ -124,7 +124,7 @@ html.theme-light .plat-ios {
   gap: var(--ios-control-gap);
 }
 
-.plat-ios .hg-ios-navigation:not(:has([data-overlay="true"]:not(.hg-ios-floating-bar-over-media))) .hg-tabbar[data-over-video="true"] {
+.plat-ios .hg-ios-navigation:not(:has(.hg-ios-top-bar > [data-nav-current="true"][data-overlay="true"]:not(.hg-ios-floating-bar-over-media))) .hg-tabbar[data-over-video="true"] {
   --p-primary: #78b9ff;
   --p-mut: rgba(255, 255, 255, .76);
   --ios-tab-material: var(--ios-media-chrome);
@@ -144,7 +144,7 @@ html.theme-light .plat-ios {
 .plat-ios .hg-tabbar button {
   font-size: 12px;
   color: var(--p-mut);
-  transition: color 150ms ease;
+  transition: color 200ms ease;
 }
 
 .plat-ios .hg-tabbar button[aria-current="page"] {
@@ -215,8 +215,41 @@ html.theme-light .plat-ios {
   scroll-padding-block: var(--ios-header-content-top) var(--ios-navigation-reserve);
 }
 
-.plat-ios .hg-ios-top-bar:has(> [data-overlay="true"]) > [data-overlay="false"] {
-  display: none;
+.plat-ios .hg-ios-top-bar > .hg-ios-floating-bar[data-nav-current="false"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.plat-ios .hg-ios-nav-surface {
+  position: absolute;
+  z-index: 9;
+  pointer-events: none;
+  border-radius: var(--ios-group-radius);
+  background: var(--ios-top-surface);
+  box-shadow: inset 0 0 0 .5px var(--ios-top-border);
+}
+
+.plat-ios .hg-ios-top-bar[data-nav-surface="true"] > .hg-ios-floating-bar[data-nav-current="true"] .hg-ios-floating-panel::before,
+.plat-ios .hg-ios-nav-ghost.hg-ios-floating-panel::before { visibility: hidden; }
+
+.plat-ios .hg-ios-nav-ghost {
+  position: absolute !important;
+  z-index: 11;
+  margin: 0 !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  color: var(--ios-top-ink);
+  pointer-events: none !important;
+}
+.plat-ios .hg-ios-nav-ghost * { pointer-events: none !important; }
+.plat-ios .hg-ios-nav-ghost :is(.hg-ios-floating-button, .hg-home-account, .hg-ios-search-field input) { color: var(--ios-top-ink); }
+/* Playback clear mode hides its material with the live owner, not with a lower page. */
+.plat-ios .win-main:has(.player-root.is-clear:not([inert] *)) .hg-ios-top-bar:has(> .hg-ios-floating-bar-over-media[data-nav-current="true"]) :is(.hg-ios-nav-surface, .hg-ios-nav-ghost),
+.plat-ios .hg-ios-navigation[data-immersive="true"] .hg-ios-top-bar:has(> .hg-ios-floating-bar-over-media[data-nav-current="true"]) :is(.hg-ios-nav-surface, .hg-ios-nav-ghost) { visibility: hidden; }
+
+.plat-ios .hg-ios-nav-ghost :is(.hg-ios-floating-button, .hg-home-account)::before {
+  background: var(--ios-top-surface);
+  box-shadow: inset 0 0 0 .5px var(--ios-top-border);
 }
 
 /* Keep the palette on the fixed host so a newly mounted bar inherits the in-flight colors. */
@@ -246,8 +279,7 @@ html.theme-light .plat-ios {
   --ios-top-ink: var(--p-on);
 }
 
-.plat-ios .hg-ios-top-bar:has(> .hg-ios-floating-bar-over-media):not(:has(> [data-overlay="true"])),
-.plat-ios .hg-ios-top-bar:has(> .hg-ios-floating-bar-over-media[data-overlay="true"]) {
+.plat-ios .hg-ios-top-bar:has(> .hg-ios-floating-bar-over-media[data-nav-current="true"]) {
   --ios-top-surface: rgba(20, 20, 23, .72);
   --ios-top-border: var(--ios-media-border);
   --ios-top-ink: #fff;
@@ -265,20 +297,11 @@ html.theme-light .plat-ios {
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .plat-ios .hg-ios-top-bar {
+  .plat-ios .hg-ios-top-bar[data-nav-ready="true"] {
     transition: --ios-top-surface 200ms ease, --ios-top-border 200ms ease, --ios-top-ink 200ms ease;
   }
 
   .plat-ios .hg-ios-swipe-segments button { transition: color 200ms ease; }
-
-  @keyframes hg-ios-nav-content-in {
-    from { opacity: .55; }
-    to { opacity: 1; }
-  }
-
-  .plat-ios .hg-tabbar button svg {
-    animation: hg-ios-nav-content-in 150ms ease-out;
-  }
 
   .plat-ios .hg-ios-navigation :is(.hg-ios-floating-bar-over-media, .hg-tabbar) {
     transition: opacity 160ms ease, visibility 0s;
@@ -373,7 +396,7 @@ html.theme-light .plat-ios {
   padding-inline-end: 0;
 }
 
-.plat-ios .hg-ios-floating-panel:has(.hg-ios-search-field:focus-within)::before {
+.plat-ios .hg-ios-floating-panel:has(.hg-ios-search-field:focus-within) {
   --ios-panel-focus-ring: inset 0 0 0 1px color-mix(in srgb, var(--p-primary) 55%, transparent);
 }
 
@@ -501,7 +524,8 @@ html.theme-light .plat-ios {
 }
 
 /* Only content panes and this indicator move; both navigation hosts stay fixed. */
-.plat-ios .hg-ios-swipe-segments { position: relative; isolation: isolate; }
+.plat-ios .hg-ios-swipe-segments { position: relative; isolation: isolate; display: flex; }
+.plat-ios .hg-ios-swipe-segments > button { font-weight: 500; line-height: 20px; }
 .plat-ios .hg-ios-swipe-segments button[aria-pressed="true"]::before { content: none; }
 .plat-ios .hg-ios-swipe-indicator { position: absolute; left: 0; top: var(--ios-segment-selected-inset, var(--ios-compact-inset)); bottom: var(--ios-segment-selected-inset, var(--ios-compact-inset)); z-index: -1; border-radius: var(--ios-control-radius); background: var(--ios-segment-selected-surface, var(--ios-selected)); pointer-events: none; }
 .plat-ios .hg-ios-tab-viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: pan-y; scroll-padding-left: var(--ios-safe-left); scroll-padding-right: var(--ios-safe-right); }
@@ -569,6 +593,16 @@ html.theme-light .plat-ios {
   background: var(--p-s1);
 }
 
+/* Grouped rows share fixed dividers: press feedback must not scale their border. */
+.plat-ios .hg-ios-settings-group > button:active {
+  transform: none;
+}
+.plat-ios .hg-ios-settings-group > button:active:not(:disabled),
+.plat-ios .hg-ios-sidebar-disclosure:active {
+  background-color: var(--p-s3);
+}
+.plat-ios .hg-ios-sidebar-disclosure { transition: background-color 160ms ease; }
+
 .plat-ios .hg-ios-settings-group > :not(:last-child) {
   border-color: var(--ios-divider);
 }
@@ -583,7 +617,7 @@ html.theme-light .plat-ios {
 }
 
 .plat-ios .hg-ios-settings-group > :is(button, div, label),
-.plat-ios .hg-ios-sidebar-settings > :is(summary, div) {
+.plat-ios .hg-ios-sidebar-disclosure {
   padding-inline: var(--ios-settings-row-inset);
   gap: var(--ios-settings-label-gap);
 }
@@ -622,19 +656,47 @@ html.theme-light .plat-ios {
   border-radius: 0;
 }
 
-.plat-ios .hg-ios-sidebar-settings > ol {
+/* Inline disclosure: reserve no closed content space; reverse from the current frame. */
+.plat-ios .hg-ios-settings-group > .hg-ios-sidebar-settings { min-height: 0; padding-inline: 0; }
+.plat-ios .hg-ios-sidebar-disclosure { min-height: var(--ios-row-single); }
+.plat-ios .hg-ios-sidebar-chevron {
+  transform: rotate(90deg);
+  transition: transform 240ms ease;
+}
+.plat-ios .hg-ios-sidebar-settings[data-expanded="true"] .hg-ios-sidebar-chevron { transform: rotate(270deg); }
+.plat-ios .hg-ios-sidebar-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition: grid-template-rows 240ms ease, opacity 200ms ease, visibility 0s 240ms;
+}
+.plat-ios .hg-ios-sidebar-collapse-inner { min-height: 0; overflow: hidden; }
+.plat-ios .hg-ios-sidebar-settings[data-expanded="true"] .hg-ios-sidebar-collapse {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.plat-ios .hg-ios-sidebar-reset-wrap { opacity: 0; visibility: hidden; transition: opacity 200ms ease, visibility 0s 240ms; }
+.plat-ios .hg-ios-sidebar-settings[data-expanded="true"] .hg-ios-sidebar-reset-wrap { opacity: 1; visibility: visible; transition-delay: 0s; }
+@media (prefers-reduced-motion: reduce) {
+  .plat-ios :is(.hg-ios-sidebar-chevron, .hg-ios-sidebar-collapse, .hg-ios-sidebar-reset-wrap) { transition: none; }
+}
+
+.plat-ios .hg-ios-sidebar-collapse ol {
   margin-inline: var(--ios-control-gap);
   margin-bottom: var(--ios-control-gap);
   gap: var(--ios-control-gap);
 }
 
-.plat-ios .hg-ios-sidebar-settings[open] > summary > span:nth-child(2) {
+.plat-ios .hg-ios-sidebar-settings[data-expanded="true"] > button > span:nth-child(2) {
   margin-inline-end: 76px;
 }
 
 .plat-ios .hg-ios-sidebar-reset {
   position: absolute;
-  top: 2px;
+  top: calc((var(--ios-row-single) - var(--ios-control-target)) / 2);
   inset-inline-end: calc(var(--ios-settings-row-inset) + 23px);
 }
 
@@ -642,7 +704,7 @@ html.theme-light .plat-ios {
   border-radius: var(--ios-control-radius);
 }
 
-.plat-ios .hg-ios-sidebar-settings > ol > li {
+.plat-ios .hg-ios-sidebar-collapse ol > li {
   border-radius: var(--ios-control-radius);
 }
 
@@ -1440,10 +1502,16 @@ html:has(.hg-native-video.is-ready) body,
 .plat-ios .hg-ios-full-seek { bottom: calc(var(--sab) + 56px) !important; height: var(--ios-control-target) !important; }
 .plat-ios .hg-ios-full-seek > div > div:first-child { top: 50%; bottom: auto; translate: 0 -50%; height: 3px; }
 .plat-ios .hg-ios-full-actions { bottom: calc(var(--sab) + 8px) !important; height: var(--ios-control-target); }
-.plat-ios .hg-ios-full-action { position: relative; isolation: isolate; display: flex; align-items: center; justify-content: center; min-width: var(--ios-control-target); height: var(--ios-control-target); padding-block: 4px; border-radius: var(--ios-group-radius); background: transparent; }
+.plat-ios .hg-ios-full-action { position: relative; isolation: isolate; display: flex; align-items: center; justify-content: center; min-width: var(--ios-control-target); height: var(--ios-control-target); padding: var(--ios-compact-inset); border-radius: var(--ios-group-radius); background: transparent; }
 .plat-ios .hg-ios-full-action-face { display: flex; align-items: center; justify-content: center; gap: 4px; height: var(--ios-control-face); min-width: var(--ios-control-face); padding-inline: 8px; border: .5px solid var(--ios-media-border); border-radius: var(--ios-control-radius); background: var(--ios-media-chrome); }
-.plat-ios .hg-ios-speed-dismiss { min-height: var(--ios-control-target); }
-.plat-ios .hg-ios-speed-dismiss-face { display: flex; align-items: center; min-height: var(--ios-control-face); padding: 4px 12px; border-radius: var(--ios-control-radius); }
+.plat-ios .hg-ios-full-action[data-active="true"] .hg-ios-full-action-face { background: var(--p-primary); color: var(--p-on-primary); }
+.plat-ios .hg-ios-speed-dismiss { height: var(--ios-control-target); min-height: var(--ios-control-target); min-width: var(--ios-control-target); justify-content: center; padding: 0; border-radius: var(--ios-control-radius); background: transparent; }
+.plat-ios .hg-ios-speed-dismiss-face { display: flex; align-items: center; justify-content: center; gap: var(--ios-control-gap); height: var(--ios-control-face); padding: 0 var(--ios-row-inset); border-radius: var(--ios-control-radius); font-size: 13px; line-height: 20px; }
+.plat-ios .hg-ios-speed-copy { display: grid; text-align: center; }
+.plat-ios .hg-ios-speed-copy > span { grid-area: 1 / 1; }
+.plat-ios .hg-ios-speed-measure { padding-inline-start: calc(16px + var(--ios-control-gap)); }
+.plat-ios .hg-ios-speed-current { display: flex; align-items: center; justify-self: center; gap: var(--ios-control-gap); }
+.plat-ios .hg-ios-speed-current > svg { flex-shrink: 0; }
 .plat-ios .hg-ios-article-seek-target { height: var(--ios-control-target); display: flex; align-items: center; }
 .plat-ios .hg-ios-article-seek-target > .hg-range { display: block; height: var(--ios-control-target); margin: 0; }
 .plat-ios .hg-ios-inline-controls .hg-range::-webkit-slider-runnable-track { height: 4px; }
@@ -1453,6 +1521,7 @@ html:has(.hg-native-video.is-ready) body,
 @supports (appearance: base-select) {
   .plat-ios .hg-ios-settings-row select,
   .plat-ios .hg-ios-settings-row select::picker(select) { appearance: base-select; }
+  .plat-ios .hg-ios-settings-row select { display: inline-flex; align-items: center; justify-content: space-between; }
   .plat-ios .hg-ios-settings-row select::picker(select) { padding: var(--ios-control-gap); margin-block: var(--ios-control-gap); border: .5px solid var(--ios-divider); border-radius: var(--ios-group-radius); background: var(--p-s1); color: var(--p-on); }
   .plat-ios .hg-ios-settings-row select option { display: flex; align-items: center; gap: var(--ios-content-gap); }
   .plat-ios .hg-ios-settings-row select option:checked { color: var(--p-primary); background: var(--p-pc); }
@@ -1475,21 +1544,26 @@ html:has(.hg-native-video.is-ready) body,
 }
 
 /* Shared action-list appearance, independent from UIKit's menu surface. */
-.plat-ios :is(.hg-cover-action-item, .hg-ios-settings-row select option) { box-sizing: border-box; height: var(--ios-control-target); min-height: var(--ios-control-target); flex-shrink: 0; padding: 0 var(--ios-row-inset); border-radius: var(--ios-control-radius); font-family: inherit; font-weight: 400; font-size: var(--ios-font-body); line-height: var(--ios-line-body); white-space: nowrap; }
+.plat-ios :is(.hg-ios-choice-row, .hg-ios-settings-row select option) { box-sizing: border-box; height: var(--ios-control-target); min-height: var(--ios-control-target); flex-shrink: 0; padding: 0 var(--ios-row-inset); border-radius: var(--ios-control-radius); font-family: inherit; font-weight: 400; font-size: var(--ios-font-body); line-height: var(--ios-line-body); white-space: nowrap; }
 .plat-ios .hg-cover-menu-layer { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; overflow: hidden; background: transparent; color: var(--p-on); z-index: 200; }
 .plat-ios .hg-cover-menu-layer::backdrop { background: transparent; }
 .plat-ios .hg-cover-menu-backdrop { position: absolute; inset: 0; background: rgb(0 0 0 / .4); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
 .plat-ios .hg-cover-menu-preview { position: fixed; pointer-events: none; transform-origin: 0 0; filter: drop-shadow(0 8px 16px rgb(0 0 0 / .3)); }
-.plat-ios .hg-cover-action-menu { padding: var(--ios-control-gap); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; border: .5px solid var(--ios-divider); border-radius: var(--ios-group-radius); background: var(--p-s1); color: var(--p-on); box-shadow: 0 8px 28px rgba(0,0,0,.24); }
-.plat-ios .hg-cover-action-item { display: flex; align-items: center; gap: var(--ios-content-gap); width: 100%; border: 0; background: transparent; color: var(--p-on); text-align: left; }
-.plat-ios .hg-cover-action-item:focus-visible { outline: 2px solid var(--p-primary); outline-offset: -2px; }
-.plat-ios .hg-cover-action-item:active { background: var(--p-s3); }
-.plat-ios .hg-cover-action-item[data-destructive="true"] { color: var(--p-danger, #ff697c); }
-.plat-ios .hg-cover-action-item:disabled { opacity: .4; }
-.plat-ios .hg-cover-action-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plat-ios .hg-cover-action-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ios-font-meta); line-height: var(--ios-line-meta); color: var(--p-mut); }
-.plat-ios .hg-cover-action-item[data-has-hint] { flex-direction: column; align-items: stretch; justify-content: center; gap: 0; padding-block: var(--ios-control-gap); }
-.plat-ios .hg-cover-action-item[data-has-hint] .hg-cover-action-label { flex: none; }
+.plat-ios .hg-ios-choice-list { padding: var(--ios-control-gap); overflow-y: auto; border: .5px solid var(--ios-divider); border-radius: var(--ios-group-radius); background: var(--p-s1); color: var(--p-on); }
+.plat-ios .hg-cover-action-menu { max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); box-shadow: 0 8px 28px rgba(0,0,0,.24); }
+.plat-ios .hg-ios-choice-row { display: flex; align-items: center; gap: var(--ios-content-gap); width: 100%; border: 0; background: transparent; color: var(--p-on); text-align: left; }
+.plat-ios .hg-ios-choice-row:focus-visible { outline: 2px solid var(--p-primary); outline-offset: -2px; }
+.plat-ios .hg-ios-choice-row:active { background: var(--p-s3); }
+.plat-ios .hg-ios-choice-row[aria-pressed="true"] { background: var(--p-pc); color: var(--p-primary); }
+.plat-ios .hg-ios-choice-row[data-destructive="true"] { color: var(--p-danger, #ff697c); }
+.plat-ios .hg-ios-choice-row:disabled { opacity: .4; }
+.plat-ios .hg-ios-choice-copy { flex: 1; min-width: 0; }
+.plat-ios .hg-ios-choice-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plat-ios .hg-ios-choice-hint { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ios-font-meta); line-height: var(--ios-line-meta); color: var(--p-mut); }
+.plat-ios .hg-ios-choice-row[data-has-hint] { padding-block: var(--ios-control-gap); }
+.plat-ios .hg-ios-choice-mark { display: grid; place-items: center; width: 16px; height: 16px; flex-shrink: 0; color: var(--p-primary); }
+.plat-ios .hg-ios-choice-title { font-size: var(--ios-font-body); line-height: var(--ios-line-body); }
+.plat-ios .hg-ios-choice-description { font-size: var(--ios-font-meta); line-height: var(--ios-line-meta); }
 
 .plat-ios :where(.hg-meta) { font-size: var(--ios-font-meta); line-height: var(--ios-line-meta); }
 .plat-ios .article-body { max-width: 640px; margin-inline: auto; }
@@ -1503,10 +1577,26 @@ html:has(.hg-native-video.is-ready) body,
 .plat-ios [data-hg-menu-card] img { pointer-events: none; }
 .plat-ios [data-hg-menu-card]:focus-visible { outline: 2px solid var(--p-primary); outline-offset: 2px; }
 
-.plat-ios .hg-ios-quality-options { max-height: max(var(--ios-control-target), min(calc(6 * var(--ios-control-target)), calc(100dvh - var(--sat) - var(--sab) - 3 * var(--ios-control-target)))); }
+.plat-ios .hg-ios-quality-options { max-height: max(calc(var(--ios-control-target) + 2 * var(--ios-control-gap) + 1px), min(calc(6 * var(--ios-control-target) + 2 * var(--ios-control-gap) + 1px), calc(100dvh - var(--sat) - var(--sab) - 3 * var(--ios-control-target)))); }
 .plat-ios .hg-ios-detail-metrics { font-size: var(--ios-font-meta); line-height: var(--ios-line-meta); }
 
 @media (max-height: 260px) {
   .plat-ios .hg-ios-quality-description,
   .plat-ios .hg-ios-sheet:has(.hg-ios-quality-options) .hg-ios-sheet-grabber { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plat-ios .hg-ios-switch, .plat-ios .hg-ios-switch > span { transition: none; }
+}
+
+/* The two glyphs share one fixed box; navigation never shifts when selection changes. */
+.plat-ios .hg-ios-tab-glyph { display: grid; width: 14px; height: 14px; flex-shrink: 0; }
+.plat-ios .hg-ios-tab-glyph > svg { grid-area: 1 / 1; transition: opacity 200ms ease; }
+.plat-ios .hg-ios-tab-glyph > svg:first-child { opacity: 1; }
+.plat-ios .hg-ios-tab-glyph > svg:last-child { opacity: 0; }
+.plat-ios .hg-ios-tab-glyph[data-selected="true"] > svg:first-child { opacity: 0; }
+.plat-ios .hg-ios-tab-glyph[data-selected="true"] > svg:last-child { opacity: 1; }
+.plat-ios .hg-ios-tab-glyph[data-static="true"] > svg { opacity: 1; transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .plat-ios .hg-tabbar::before, .plat-ios .hg-tabbar button, .plat-ios .hg-ios-tab-glyph > svg { transition: none; }
 }

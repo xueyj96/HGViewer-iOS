@@ -1,27 +1,39 @@
 {
   "schema_version": 1,
   "app": "HGViewer/HGhub iOS",
-  "as_of": "2026-11-11",
-  "source_version": "1.1.106",
-  "document_state": "selected and implemented; final production frontend regression and native build verified; delivery tracked separately",
+  "as_of": "2026-11-12",
+  "source_version": "1.2.0",
+  "document_state": "final iOS frontend passed 68 light and 68 dark route checks; device acceptance tracked separately",
   "scope": "all page entrypoints and shared UI families; iPhone standards, desktop family kept separately",
   "count_semantics": "records count control families, not rendered instances; file counts are coverage inventory only",
   "source_files": [
     {
+      "path": "src-tauri/build.rs",
+      "sha256": "e993f988595d1ff0589808550a510343b3e17cd13dddf7762de472c2d7c2bdf0"
+    },
+    {
+      "path": "src-tauri/src/lib.rs",
+      "sha256": "b95c493cb637ca1ea99704ebe0d92a8af1e41727bec4dd4e82054f93a524e7f9"
+    },
+    {
       "path": "src/App.tsx",
-      "sha256": "d3f8f12acbb49d713e12a1807dd7f278962c8644152b0135a27615d86acc51f4"
+      "sha256": "bc13e2b4f92551756e0772c090230b75038b1900f1f8bedec748273b3112dcfd"
     },
     {
       "path": "src/components/AccountCard.tsx",
-      "sha256": "3f8a60fefb0ade25a51e2a5c5a0680b5053a6301a8a9e1c5a45f6b4c4d1b596b"
+      "sha256": "faf2149277784d53977725af7c8da394d2f17b46d5b5362abda940c0a7d3f0b2"
     },
     {
       "path": "src/components/CachePageFrame.tsx",
       "sha256": "b286a4ea5378473cce403e41f64d42d0afa620f665bfcb565d07670eb54b9063"
     },
     {
+      "path": "src/components/ChoiceList.tsx",
+      "sha256": "bedca668e2536ef27a158a4be54e2dc66d5ead39dbf44ec3160ed20ac60b79b6"
+    },
+    {
       "path": "src/components/CoverActionMenu.tsx",
-      "sha256": "4fb97a18db84ada453f14cf644433ded989d8260706c64ba395bf79f2044a177"
+      "sha256": "1d076b8cfb217e5f7c8c08ec51535f0b3ddb0f143e0e4519e3c207cb6cc8ad0b"
     },
     {
       "path": "src/components/DesktopChrome.tsx",
@@ -33,7 +45,7 @@
     },
     {
       "path": "src/components/Feed.tsx",
-      "sha256": "1e1b1c35f596f576156faa98f41ba9de595b1551a878bf41c5e40fede5326bdd"
+      "sha256": "22e00ca0521dd3d9de8b729a8ccd06ae0d23fbdbe30c1cdf4042d2c6533980f5"
     },
     {
       "path": "src/components/IOSChannelBackFrame.tsx",
@@ -49,15 +61,23 @@
     },
     {
       "path": "src/components/IOSPageBar.tsx",
-      "sha256": "48c7ba2313fa3546be67ce7369585d659c9b2499ac227e761367c066a31e96f9"
+      "sha256": "6a1a207e29cc974aae0391ad7abd82713f62c4aa8a8ea1db9ee313fa57761917"
     },
     {
       "path": "src/components/IOSRotateButton.tsx",
       "sha256": "a0f7bad90a6f52853e0568e058294104af2c8b891fdba960f63d3316c450d894"
     },
     {
+      "path": "src/components/IOSSegments.tsx",
+      "sha256": "e7e8904e0749228ef33800d1f738bcc66ad54eefe67d92a6e8a00e70b5194ce6"
+    },
+    {
       "path": "src/components/IOSSymbol.tsx",
       "sha256": "73e3890cba02bf1689974d173c78fd9f4547028f277e202977f832cdd766c7f6"
+    },
+    {
+      "path": "src/components/IOSTabSwipe.tsx",
+      "sha256": "66b11203e098e1a7d778521587b2d4eb502678b907be4183188fbb34cf8a6223"
     },
     {
       "path": "src/components/IOSVideoSurface.tsx",
@@ -69,7 +89,7 @@
     },
     {
       "path": "src/components/LoginModal.tsx",
-      "sha256": "3cc9b65111dc0e378a909a7fc3f1db09eb2c02f2aa08cc8fcc1377531f2074ab"
+      "sha256": "41e618be55d44b6438eee70b28c407484bf8c8d57458f7c0636375faeae4d8e6"
     },
     {
       "path": "src/components/Panels.tsx",
@@ -77,11 +97,11 @@
     },
     {
       "path": "src/components/PlaybackQuality.tsx",
-      "sha256": "9e47b8d419deb25c7c4b15a318e2e62adc72d81d39718f7740417d07ca5733d6"
+      "sha256": "b4495c6283f867baeec02107041d7015f7a715952e59aae16282b8a8f3c9d5d8"
     },
     {
       "path": "src/components/PlaybackSidebarSettings.tsx",
-      "sha256": "3b19164fc4d5693962825c4755c259513fc8790d0bc0a8bd205391990b3f8c81"
+      "sha256": "39db51cdb6e614ae2276e97aeab9e9b2d5825c18315cd53fcb415ba78862b61c"
     },
     {
       "path": "src/components/Player.tsx",
@@ -108,6 +128,10 @@
       "sha256": "16495046d47a41f7da336673f7c00ad835d0deaf9c1603430fbb0b8c1e24d380"
     },
     {
+      "path": "src/components/coverMenuPreview.ts",
+      "sha256": "693ae4f8ce5a30c17e2a819bf0a670332c9274093fb0840f504c124190638ba1"
+    },
+    {
       "path": "src/components/ui.tsx",
       "sha256": "c96f2391426454201529a86180f91511e8505d82bc6974bbb13688dc1718e0b7"
     },
@@ -116,12 +140,16 @@
       "sha256": "3fefed842db307ac632259a8b8f3a913619aeff4001b9d21d5df7147884cb8a3"
     },
     {
+      "path": "src/components/useIOSTopBarMotion.ts",
+      "sha256": "b76ced22fd7b3a32ece488918801352633a34f5cc1180ba1bbeb2a47fc263dce"
+    },
+    {
       "path": "src/index.css",
       "sha256": "c351c133725abd6ce9cc216f0639b34f00f9dca66a90ed812d0becea882f9cdc"
     },
     {
       "path": "src/ios.css",
-      "sha256": "971e9b389ad7d4d0ba7bc66b6c8ad2737d40719d5cd975599e24b8b0fa24358f"
+      "sha256": "a97903115c89a3c992a6da80237d078590fbbe3194396ada5fd1af1325b66c77"
     },
     {
       "path": "src/pages/Category.tsx",
@@ -129,7 +157,7 @@
     },
     {
       "path": "src/pages/Home.tsx",
-      "sha256": "e164101851d918d74ab2c57d9a8be20c4c545a6defb4099b687497ca2bd1823f"
+      "sha256": "a534f71be5057f5a45805768327b0bcacc29cad7580f394d2db218fc051b2f8b"
     },
     {
       "path": "src/pages/Offline.tsx",
@@ -153,31 +181,11 @@
     },
     {
       "path": "src/pages/Settings.tsx",
-      "sha256": "8ffccea23ddc19bac0fc80b1db04a14f21a083cbcd8da8a67582b4199a6d8f24"
+      "sha256": "f9d4b7c210c1cfd44248f4af95144b5454c4c3fbaddc161015fc043e8575ec8f"
     },
     {
       "path": "src/workspaceTabs.ts",
       "sha256": "b7253baf240aed0655a57919b8a8225c928f488506bd5c4dafe7bd15722d03fb"
-    },
-    {
-      "path": "src-tauri/build.rs",
-      "sha256": "e993f988595d1ff0589808550a510343b3e17cd13dddf7762de472c2d7c2bdf0"
-    },
-    {
-      "path": "src-tauri/src/lib.rs",
-      "sha256": "b95c493cb637ca1ea99704ebe0d92a8af1e41727bec4dd4e82054f93a524e7f9"
-    },
-    {
-      "path": "src/components/coverMenuPreview.ts",
-      "sha256": "693ae4f8ce5a30c17e2a819bf0a670332c9274093fb0840f504c124190638ba1"
-    },
-    {
-      "path": "src/components/IOSTabSwipe.tsx",
-      "sha256": "f65b9cd385f5363eeec6452169f212e3fe5b44c5c12f8289c7d31fbfd7a6e598"
-    },
-    {
-      "path": "src/components/useIOSTopBarMotion.ts",
-      "sha256": "7397bfffd27cc98c41e4c3d6931fb2a6336cbaf4cd83db9b8657933628a0ea4f"
     }
   ],
   "cross_app_policy": "share taxonomy/evidence fields only; each app owns its numbers; no message sent to other sessions",
@@ -207,7 +215,7 @@
       },
       "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
       "baseline_current": "44点击、36可见、R8；页边16；框内4",
-      "current": "44点击/36可见/R8；页边16，组内4，单一安全区与导航reserve",
+      "current": "44点击/36可见/R8；页边16，组内4，单一安全区与导航reserve；唯一顶栏owner，旧内容只读副本退场/真实背景left-width伸缩，host固定；全局登录priority高于内容overlay",
       "selected_standard": "44点击/36可见/R8；页边16，组内4，单一安全区与导航reserve"
     },
     {
@@ -234,7 +242,7 @@
       },
       "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
       "baseline_current": "44×44点击、36×36可见；返回16图标，账户/榜单20",
-      "current": "44×44点击/36×36可见，普通图标16/账户20，R8",
+      "current": "44×44点击/36×36可见，普通图标16/账户20，R8；账户退出操作44目标/36面/R4/16图标（头像保持圆形）",
       "selected_standard": "44×44点击/36×36可见，普通图标16/账户20，R8",
       "baseline_runtime_measurements": [
         {
@@ -328,7 +336,7 @@
       },
       "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
       "baseline_current": "44点击高、36可见高；图标14、文字12",
-      "current": "44点击/36可见，图标14、文字12；底部安全区后可见留白8",
+      "current": "44点击/36可见，图标14、文字12；底部安全区后可见留白8；固定14图标框，常态与选中图标不同则200ms原位交叉，同图标只过渡颜色",
       "selected_standard": "44点击/36可见，图标14、文字12；底部安全区后可见留白8"
     },
     {
@@ -419,14 +427,16 @@
     {
       "id": "segments",
       "category": "分段栏",
-      "shared_implementation": "hg-ios-segments",
+      "shared_implementation": "IOSSegmentFrame/segmentRect/paintSegment; IOSSegmentedControl for settings; IOSTabSwipe for page gestures",
       "used_by": [
         "账号、分类、榜单、资料库、显示模式、详情选集"
       ],
       "standard_status": "implemented",
       "sources": [
-        "src/ios.css:457",
-        "src/ios.css:491"
+        "src/components/IOSSegments.tsx:1",
+        "src/components/IOSTabSwipe.tsx:1",
+        "src/pages/Settings.tsx:1",
+        "src/ios.css:504"
       ],
       "exceptions": "不同数字属于嵌套层次，不是冲突",
       "verification": "current source + final regression logs; device behavior boundary separately recorded",
@@ -440,7 +450,7 @@
       },
       "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
       "baseline_current": "44点击/36组框/28选中面；13字号；4间隙",
-      "current": "44点击/36组框/28选中；13字、间4，顶栏等宽动作位；顶栏分栏IOSTabSwipe统一边缘跟手/正文与thumb同步，提交200/回弹170，固定导航host；六组消费者",
+      "current": "44点击/36组框/28选中；13字、间4，顶栏等宽动作位；顶栏分栏IOSTabSwipe统一边缘跟手/正文与thumb同步，提交200/回弹170，固定导航host；六组消费者；显示模式与顶栏共用可视框、几何和绘制；设置值直接提交/指示器200ms，快速切换从当前帧续接；宽变重排/reduce跳过；多栏边缘首尾循环，正文方向独立于索引，单栏不占用父返回；2↔3结构变更时内部位置和指示块宽度衔接；同组跟手不重播整栏；busy由preview派生",
       "selected_standard": "44点击/36组框/28选中；13字、间4，顶栏等宽动作位",
       "baseline_runtime_measurements": [
         {
@@ -809,7 +819,7 @@
       },
       "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
       "baseline_current": "普通51×31，紧凑40×24；伪元素补44点击区",
-      "current": "所有iOS开关40×24/拇指20，伪元素补44×44操作区；无51×31分档",
+      "current": "所有iOS开关40×24/拇指20，伪元素补44×44操作区；无51×31分档；reduce-motion关闭轨道和拇指transition",
       "selected_standard": "所有iOS开关40×24/拇指20，伪元素补44×44操作区；无51×31分档",
       "baseline_runtime_measurements": [
         {
@@ -1097,7 +1107,7 @@
       },
       "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
       "baseline_current": "行44，拖柄44，行间4，恢复默认44/28",
-      "current": "compact行44、拖柄44、开关40×24、组内4、R4；恢复默认44/28",
+      "current": "展开按钮52高；列表行44、拖柄44、开关40×24、组内4、R4；恢复默认44/28；高度与箭头240ms，内容200ms",
       "selected_standard": "compact行44、拖柄44、开关40×24、组内4、R4；恢复默认44/28",
       "baseline_runtime_measurements": [
         {
@@ -1225,33 +1235,35 @@
     {
       "id": "quality_menu",
       "category": "自定义菜单",
-      "shared_implementation": "QualitySheet",
+      "shared_implementation": "QualitySheet + ChoiceList/ChoiceRow",
       "used_by": [
         "播放清晰度"
       ],
       "standard_status": "implemented",
       "sources": [
-        "src/components/PlaybackQuality.tsx:60"
+        "src/components/PlaybackQuality.tsx:60",
+        "src/components/ChoiceList.tsx:1",
+        "src/ios.css:1479"
       ],
       "exceptions": "系统菜单不使用该网页尺寸",
       "verification": "current source + final regression logs; device behavior boundary separately recorded",
       "dimension_fields": {
-        "visible_frame": null,
-        "hit_target": null,
-        "glyph": null,
-        "typography": null,
-        "spacing": null,
-        "radius": null
+        "visible_frame": "row44",
+        "hit_target": "row44",
+        "glyph": "selected16",
+        "typography": "14/20/400",
+        "spacing": "outer4/x12",
+        "radius": "outerR8/rowR4"
       },
       "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
       "baseline_current": "行min44、横12、字号14、勾16，max38vh",
-      "current": "44行/横12/字14/20/R8；max高按视口与6行预算，短视口保留一行/关闭",
-      "selected_standard": "44行/横12/字14/20/R8；max高按视口与6行预算，短视口保留一行/关闭"
+      "current": "共用选项固定44/横12/R4/14字20行高400字重；选中标记16；外框R8/内4；max高按视口与6行预算，短视口保留完整一行/关闭",
+      "selected_standard": "共用选项固定44/横12/R4/14字20行高400字重；选中标记16；外框R8/内4；max高按视口与6行预算，短视口保留完整一行/关闭"
     },
     {
       "id": "native_context_menu",
       "category": "封面操作菜单",
-      "shared_implementation": "UIContextMenuInteraction/UIMenu",
+      "shared_implementation": "CoverActionMenu + ChoiceList/ChoiceRow + coverMenuPreview",
       "used_by": [
         "封面长按"
       ],
@@ -1259,9 +1271,10 @@
       "sources": [
         "src/components/IOSCoverMenu.ts:1",
         "src/components/CoverActionMenu.tsx:1",
-        "src/App.tsx:1"
+        "src/App.tsx:1",
+        "src/components/ChoiceList.tsx:1"
       ],
-      "exceptions": "以简洁Web动作列表替代UIKit预览；Popover API不可用时使用同一DOM回退",
+      "exceptions": "Popover API不可用时使用同一DOM回退；旧UIKit桥已删除，Web预览与菜单共用manual顶层",
       "verification": "current source + final regression logs; device behavior boundary separately recorded",
       "dimension_fields": {
         "visible_frame": "popup content width /rows44",
@@ -1723,7 +1736,7 @@
       },
       "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
       "baseline_current": "中心66/28、64/26、56/24；部分全屏播放36/倍速32点击",
-      "current": "iOS沉浸64/28、内嵌56/24；全屏操作44/36与速度解除44；非iOS保留原字号回退",
+      "current": "iOS沉浸64/28、内嵌56/24；全屏操作44/36与速度解除44；非iOS保留原字号回退；倍速锁定提示外层透明44/可见36/R4/13字20行高/横12/图文4，三态同中心与宽度；图标与当前文案整体居中，真实边缘间距4，最长文案仅用于隐藏占位，不将图标推远",
       "selected_standard": "iOS沉浸64/28、内嵌56/24；全屏操作44/36与速度解除44；非iOS保留原字号回退"
     },
     {
@@ -1807,7 +1820,7 @@
       },
       "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
       "baseline_current": "卡内/居中媒体错误共存；下载设置失败仍undefined显示读取中",
-      "current": "PageStatus正文14/20、说明12/18、内12；下载设置失败显示明确错误+重试，不再停留读取中；保存中不加空大行",
+      "current": "PageStatus正文14/20、说明12/18、内12；下载设置失败显示明确错误+重试，不再停留读取中；保存中不加空大行；首页失败动作复用CompactAction，44目标/28面/R4/同排4",
       "selected_standard": "PageStatus正文14/20、说明12/18、内12；下载设置失败显示明确错误+重试，不再停留读取中；保存中不加空大行"
     },
     {
@@ -2015,6 +2028,39 @@
         "build/releases/1.1.102/verification/menu-regression.log",
         "build/releases/1.1.102/verification/dimensions-regression.log"
       ]
+    },
+    {
+      "version": "1.1.107",
+      "method": "independent source audit/review plus component and production-frontend browser regression; native delivery separately recorded",
+      "scope": "shared segments/settings value changes, quality/menu choice rows, reduced-motion switch and existing tab/menu regression",
+      "logs": [
+        "build/verification/selection-unification/",
+        "build/releases/1.1.107/verification/"
+      ]
+    },
+    {
+      "version": "1.1.108",
+      "method": "independent read-only cyclic transition/visible-face source review; actual production frontend CDP touches and role geometry",
+      "logs": [
+        "build/verification/tab-loop/"
+      ]
+    },
+    {
+      "version": "1.1.109",
+      "method": "actual production Feed CDP hold/armed/locked and reset in portrait/landscape; DOM icon/text edge distance and centered group measured",
+      "result": "actual icon-to-text gap4, group center delta0; target44/face36/R4; stable width across states",
+      "logs": [
+        "build/verification/speed-spacing/regression.log"
+      ]
+    },
+    {
+      "version": "1.2.0",
+      "method": "full source mapping18 IOSPageBar sites; six center shapes30 directed transitions; independent review and before/after interruption reproduction",
+      "logs": [
+        "build/verification/chrome-motion/",
+        "build/releases/1.2.0/verification/"
+      ],
+      "boundary": "final iOS route regression, signed install, native device acceptance and public release separately tracked"
     }
   ]
 }

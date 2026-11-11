@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { coverMenuLayout, coverMenuPreview } from "./coverMenuPreview";
 import { IOS_LAYOUT_CHANGE } from "../iosGeometry";
 import { COVER_MENU_CHANGE, getCoverMenu, runCoverMenuAction, type CoverMenuTarget } from "./IOSCoverMenu";
+import { ChoiceList, ChoiceRow } from "./ChoiceList";
 
 type OpenMenu = { target: CoverMenuTarget };
 type Hold = { card: HTMLElement; pointer: number; x: number; y: number; timer: number };
@@ -329,20 +330,16 @@ export default function CoverActionMenu() {
     {open && <div ref={layer} popover={typeof HTMLElement.prototype.showPopover === "function" ? "manual" : undefined} className="hg-cover-menu-layer">
       <div ref={backdrop} className="hg-cover-menu-backdrop" aria-hidden="true" />
       <div ref={preview} className="hg-cover-menu-preview" aria-hidden="true" inert />
-      <div ref={menu} role="menu" aria-label="剧集操作" className="hg-cover-action-menu"
+      <ChoiceList ref={menu} role="menu" aria-label="剧集操作" className="hg-cover-action-menu"
       style={{ position: "fixed", margin: 0, inset: "auto", boxSizing: "border-box", overflowY: "auto" } as CSSProperties}>
-      {open.target.items.map((item) => <button key={item.action} type="button" role="menuitem" tabIndex={-1}
-        disabled={item.disabled} aria-disabled={item.disabled || undefined} data-destructive={item.destructive || undefined}
-        data-has-hint={item.hint ? true : undefined} aria-label={item.label} title={item.hint} aria-description={item.hint}
+      {open.target.items.map((item) => <ChoiceRow key={item.action} label={item.label} hint={item.hint}
+        disabled={item.disabled} destructive={item.destructive} role="menuitem" tabIndex={-1}
         className="hg-cover-action-item" onClick={() => {
           const target = current.current?.target;
           close();
           if (target) runCoverMenuAction(target, item.action);
-        }}>
-        <span className="hg-cover-action-label">{item.label}</span>
-        {item.hint && <span className="hg-cover-action-hint">{item.hint}</span>}
-      </button>)}
-      </div>
+        }} />)}
+      </ChoiceList>
     </div>}
   </>;
 }

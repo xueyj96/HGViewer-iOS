@@ -4,6 +4,7 @@ import { ICheck } from "../icons";
 import { CompactAction, Sheet } from "./ui";
 import { IOSCloseButton } from "./IOSPageBar";
 import { isIos } from "../api";
+import { ChoiceList, ChoiceRow } from "./ChoiceList";
 
 type QualityChoice = { index: number; height: number; bitrate: number };
 type QualityLevel = QualityChoice & { label: string };
@@ -51,21 +52,28 @@ export function QualitySheet({ open, quality, selected, onClose, onSelect, onPre
     <Sheet open={open && levels.length > 0} onClose={onClose} z="z-[55]" label="清晰度" onPresenceChange={onPresenceChange}>
       <div className="hg-ios-browse-content px-4 pb-4">
         <div className="mb-1 flex items-center justify-between">
-          <div className="text-sm font-semibold text-on">清晰度</div>
+          <div className={`${isIos ? "hg-ios-choice-title" : ""} text-sm font-semibold text-on`}>清晰度</div>
           {isIos ? <IOSCloseButton onClose={onClose} /> : <CompactAction tone="neutral" onClick={onClose}>关闭</CompactAction>}
         </div>
-        <p className="hg-ios-quality-description mb-2 text-xs text-mut">
+        <p className={`${isIos ? "hg-ios-choice-description" : ""} hg-ios-quality-description mb-2 text-xs text-mut`}>
           {levels.length === 1 ? "此视频只有一个清晰度" : current ? `当前播放 ${current.label}` : "自动按网速调整"}
         </p>
-        <div className={`${isIos ? "hg-ios-quality-options" : "max-h-[38vh]"} overflow-y-auto rounded-(--r-md) bg-s3`}>
-          {choices.map((item) => (
-            <button type="button" key={item.index} aria-pressed={selected === item.index}
-              onClick={() => onSelect(item.index)}
-              className="flex min-h-11 w-full items-center justify-between border-b border-s4 px-3 text-left text-sm text-on last:border-b-0 pressable">
-              {item.label}{selected === item.index && <ICheck size={16} className="text-primary" />}
-            </button>
-          ))}
-        </div>
+        {isIos ? (
+          <ChoiceList className="hg-ios-quality-options" aria-label="清晰度选项">
+            {choices.map((item) => <ChoiceRow key={item.index} label={item.label} selected={selected === item.index}
+              onClick={() => onSelect(item.index)} />)}
+          </ChoiceList>
+        ) : (
+          <div className="max-h-[38vh] overflow-y-auto rounded-(--r-md) bg-s3">
+            {choices.map((item) => (
+              <button type="button" key={item.index} aria-pressed={selected === item.index}
+                onClick={() => onSelect(item.index)}
+                className="flex min-h-11 w-full items-center justify-between border-b border-s4 px-3 text-left text-sm text-on last:border-b-0 pressable">
+                {item.label}{selected === item.index && <ICheck size={16} className="text-primary" />}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </Sheet>
   );

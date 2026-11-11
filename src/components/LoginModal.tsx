@@ -101,7 +101,7 @@ export default function LoginModal() {
     <div ref={host} className="hg-ios-auth-host pointer-events-none absolute inset-0 z-40 [&>div]:pointer-events-auto">
       <Sheet open={loginOpen} onClose={() => setLoginOpen(false)} fullPage="账号" sharedChrome initialFocus="panel" z="z-[32]">
         <div className="hg-ios-auth-page flex h-full min-h-0 flex-col">
-          <IOSPageBar label="账号" overlay hidden={!loginOpen} onBack={() => setLoginOpen(false)} endAction={
+          <IOSPageBar label="账号" overlay priority={2} hidden={!loginOpen} onBack={() => setLoginOpen(false)} endAction={
             <button type="submit" form={formId} disabled={busy || tabs.busy} aria-label={mode === "login" ? "提交登录" : "提交注册"}
               className="hg-ios-floating-button hg-ios-header-square grid place-items-center text-[13px] font-semibold text-primary disabled:opacity-50">
               {busy ? "…" : mode === "login" ? "登录" : "注册"}

@@ -3,11 +3,12 @@ import { api, APP_NAME, APP_VERSION, hostOf, isIos, platformLabel, type Download
 import { HISTORY_LIMIT, useStore } from "../store";
 import { ActionDialog, CompactAction, ConfirmAction, Modal, Sheet, Toggle } from "../components/ui";
 import { IOSPageBar } from "../components/IOSPageBar";
+import { IOSSegmentedControl } from "../components/IOSSegments";
 import { useIOSSymbols } from "../components/IOSSymbol";
 import AccountCard from "../components/AccountCard";
 import LinePicker from "../components/LinePicker";
 import PlaybackSidebarSettings from "../components/PlaybackSidebarSettings";
-import { IBack, IBoltF, IBroom, IChevR, IClock, IDownload, IHeart, IInfo, ILink, ILockF, IMoon, IRefresh, ISettings, ISun } from "../icons";
+import { IBack, IBoltF, IBroom, IChevR, IClock, IDownload, IInfo, ILink, ILockF, IMoon, IRefresh, ISettings, ISun } from "../icons";
 
 const Section = ({ title, children }: { title: string; children: ReactNode }) => (
   <>
@@ -40,7 +41,7 @@ function DownloadSettingRow({ label, description, unit, icon, value, disabled, r
 /* 独立设置页：线路 / 外观 / 本地数据 / 清理缓存 / 网络诊断 / 关于
    入口：Windows 侧栏「设置」、Android「我的」右上角齿轮 */
 export default function Settings({ onBack, wide }: { onBack: () => void; wide: boolean }) {
-  const { theme, themePreference, setTheme, favs, history, clearHistory, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity, toast } = useStore();
+  const { theme, themePreference, setTheme, history, clearHistory, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity, toast } = useStore();
   const [about, setAbout] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
   const [historyClearOpen, setHistoryClearOpen] = useState(false);
@@ -217,7 +218,8 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 </span>
                 <span className="text-sm text-on">显示模式</span>
               </div>
-              <div role="group" aria-label="显示模式" className="hg-ios-segments hg-ios-segments-compact flex bg-s3 rounded-(--r-ctl) p-1">
+              {isIos ? <IOSSegmentedControl label="显示模式" value={themePreference} onChange={setTheme}
+                options={[{ value: "system", label: "跟随系统" }, { value: "light", label: "浅色" }, { value: "dark", label: "深色" }]} /> : <div role="group" aria-label="显示模式" className="hg-ios-segments hg-ios-segments-compact flex bg-s3 rounded-(--r-ctl) p-1">
                 {([["system", "跟随系统"], ["light", "浅色"], ["dark", "深色"]] as const).map(([preference, label]) => (
                   <button type="button" key={preference} aria-pressed={themePreference === preference}
                     onClick={() => setTheme(preference)}
@@ -225,7 +227,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                     {label}
                   </button>
                 ))}
-              </div>
+              </div>}
             </div>
           </Section>
 
@@ -264,13 +266,6 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
           </Section>}
 
           <Section title="本地数据">
-            <div className="hg-ios-settings-row flex items-center gap-3 px-3.5 py-3">
-              <span className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-primary">{symbol("heart", <IHeart size={16} />)}</span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[12.5px] text-on">{isIos ? "收藏与历史" : "本地喜欢"}</div>
-                <div className="text-[10.5px] text-mut">{favs.length} 部收藏 · {history.length} 条观看记录</div>
-              </div>
-            </div>
             <button type="button" disabled={history.length === 0} onClick={() => setHistoryClearOpen(true)}
               className="hg-ios-settings-row w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-40">
               <span aria-hidden="true" className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-danger">{symbol("clock", <IClock size={16} />)}</span>
@@ -278,7 +273,6 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 <div className="text-[12.5px] text-danger">清空观看历史</div>
                 <div className="text-[10.5px] text-mut">保留最近 {HISTORY_LIMIT} 部剧的记录与续播进度</div>
               </div>
-              {symbol("chevron.right", <IChevR size={15} />, 15, "text-mut")}
             </button>
             <button onClick={() => setClearOpen(true)} className="hg-ios-settings-row w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
               <span className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-primary">{symbol("trash", <IBroom size={16} />)}</span>
@@ -286,7 +280,6 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 <div className="text-[12.5px] text-on">清理缓存</div>
                 <div className="text-[10.5px] text-mut">{isIos ? "封面与播放列表缓存" : "封面 / 播放缓存与本地记录"}</div>
               </div>
-              {symbol("chevron.right", <IChevR size={15} />, 15, "text-mut")}
             </button>
           </Section>
 
@@ -327,7 +320,6 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 <div className="text-[12.5px] text-on">网络诊断</div>
                 <div className="text-[10.5px] text-mut">检测当前线路的 DNS / 系统代理 / 网站连接</div>
               </div>
-              {symbol("chevron.right", <IChevR size={15} />, 15, "text-mut")}
             </button>
           </Section>
 
@@ -338,7 +330,6 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 <div className="text-[12.5px] text-on">检查更新</div>
                 <div className="text-[10.5px] text-mut">{checking ? "检查中…" : `当前 v${APP_VERSION} · 对比 GitHub Release`}</div>
               </div>
-              {symbol("chevron.right", <IChevR size={15} />, 15, "text-mut")}
             </button>
             <button onClick={() => setAbout(true)} className="hg-ios-settings-row w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
               <span className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-primary">{symbol("info.circle", <IInfo size={16} />)}</span>
@@ -346,7 +337,6 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 <div className="text-[12.5px] text-on">关于 {APP_NAME}</div>
                 <div className="text-[10.5px] text-mut">版本 {APP_VERSION} · 仅限非商业使用</div>
               </div>
-              {symbol("chevron.right", <IChevR size={15} />, 15, "text-mut")}
             </button>
           </Section>}
 

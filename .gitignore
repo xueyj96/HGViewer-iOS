@@ -6,8 +6,7 @@ node_modules/
 dist/
 dist-ssr/
 src-tauri/target/
-src-tauri/gen/*
-!src-tauri/gen/apple/
+src-tauri/gen/
 *.local
 
 # 编辑器 / 系统
@@ -30,7 +29,11 @@ Thumbs.db
 docs/API.md
 # 本地 iOS 构建产物
 /build/
+
 xcuserdata/
+
 *.xcuserstate
+
 ExportOptions.plist
+
 embedded.mobileprovision

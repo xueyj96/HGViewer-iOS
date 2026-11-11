@@ -6,7 +6,7 @@ import { IOSAccountButton, IOSPageBar, IOSRanksButton } from "../components/IOSP
 import { api, isIos, isMobile } from "../api";
 import type { VideoCard } from "../types";
 import { useStore } from "../store";
-import { LoadingStatus } from "../components/ui";
+import { CompactAction, LoadingStatus } from "../components/ui";
 import { ISearch, IVol, IVolMute } from "../icons";
 
 export default function Home({ active, bottomInset }: { active: boolean; bottomInset: number }) {
@@ -52,9 +52,14 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
       ) : initialError || done ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-white">
           <p role="status" className="text-sm text-white/80">{initialError || "暂时没有可播放的内容"}</p>
-          {initialError && <div className="flex flex-wrap justify-center gap-2">
+          {initialError && <div className={`flex flex-wrap justify-center ${isIos ? "gap-1" : "gap-2"}`}>
+            {isIos ? <>
+              <CompactAction tone="neutral" onClick={() => void load(1)}>重试</CompactAction>
+              <CompactAction tone="neutral" onClick={() => setLineOpen(true)}>查看线路</CompactAction>
+            </> : <>
             <button onClick={() => void load(1)} className="hg-chip rounded-full px-5 py-2 text-sm pressable">重试</button>
             <button onClick={() => setLineOpen(true)} className="hg-chip rounded-full px-5 py-2 text-sm pressable">查看线路</button>
+            </>}
           </div>}
         </div>
       ) : (

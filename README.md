@@ -4,7 +4,7 @@
 
 iOS 支持横竖屏播放、选集、离线缓存和播放记录。当前源码收敛了导航和播放器控制，修复切集时的原生白底闪烁。右侧操作栏在进入或离开播放页时淡入淡出，在播放页之间切换时保持在原位。
 
-1.1.106 完善统一尺寸与操作反馈：长按封面浮起、背景压暗与归位，菜单和数量选择器共用行高、留白与字阶；六组顶栏分栏支持边缘跟手切换，顶底栏固定，顶栏内容与布局平滑过渡。修复分栏动画结束时旧页闪回。完整尺寸标准见 [尺寸文档](docs/ui-dimensions.md) 与 [控件清单](docs/ui-dimensions-inventory.json)。
+1.2.0 统一固定导航的形态交接：单标题、搜索与双／三分栏在原位切换，背景真实伸缩，文字和图标不缩放；六组顶栏分栏支持边缘跟手与首尾循环。全局登录与内容覆盖页明确唯一顶栏归属；底栏保持固定，通过颜色和图形过渡选中状态。清晰度、数量选择器、显示模式及长按菜单共用尺寸规则，倍速锁定提示保持矩形与紧凑图文间距。完整规则见[导航动效状态图](docs/navigation-motion.md)、[尺寸标准](docs/ui-dimensions.md)与[控件清单](docs/ui-dimensions-inventory.json)。
 
 维护入口和发布校验见 [架构说明](ARCHITECTURE.md)。
 
@@ -15,6 +15,7 @@ iOS 支持横竖屏播放、选集、离线缓存和播放记录。当前源码�
 ```bash
 pnpm install --frozen-lockfile
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+pnpm version:sync
 pnpm build
 pnpm ios:sim
 ```

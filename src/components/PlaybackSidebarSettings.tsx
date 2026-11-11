@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useId, useRef, useState, type PointerEvent } from "react";
 import { IChevR, IList, IReorder } from "../icons";
 import { DEFAULT_PLAYBACK_SIDEBAR, PLAYBACK_SIDEBAR_ACTIONS, type PlaybackSidebarAction } from "../playbackSidebar";
 import { useStore } from "../store";
@@ -17,6 +17,8 @@ type Drag = {
 
 export default function PlaybackSidebarSettings() {
   const { playbackSidebar, setPlaybackSidebar } = useStore();
+  const [expanded, setExpanded] = useState(false);
+  const panelId = useId();
   const list = useRef<HTMLOListElement>(null);
   const drag = useRef<Drag | null>(null);
   const frame = useRef(0);
@@ -84,45 +86,55 @@ export default function PlaybackSidebarSettings() {
   };
 
   return (
-    <details className="hg-ios-sidebar-settings group relative">
-      <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-semibold text-on [&::-webkit-details-marker]:hidden">
+    <div className="hg-ios-sidebar-settings relative" data-expanded={expanded}>
+      <button type="button" className="hg-ios-sidebar-disclosure flex w-full items-center justify-between gap-3 px-4 text-left text-sm font-semibold text-on"
+        aria-expanded={expanded} aria-controls={panelId} onClick={(event) => {
+          if (expanded) event.currentTarget.focus({ preventScroll: true });
+          setExpanded((open) => !open);
+        }}>
         <span className="grid size-8 shrink-0 place-items-center rounded-full bg-s3 text-primary" aria-hidden="true"><IList size={16} /></span>
         <span className="min-w-0 flex-1">播放侧栏</span>
-        <IChevR size={15} className="text-mut group-open:rotate-90" aria-hidden="true" />
-      </summary>
-      <CompactAction className="hg-ios-sidebar-reset" tone="neutral" onClick={() => setPlaybackSidebar(() => DEFAULT_PLAYBACK_SIDEBAR)}>恢复默认</CompactAction>
-      <ol ref={list} className="mx-3 grid gap-1.5">
-        {playbackSidebar.map(({ action, visible }, index) => {
-          const label = PLAYBACK_SIDEBAR_ACTIONS[action];
-          const lifted = preview?.index === index && preview.offset !== 0;
-          const shift = !preview ? 0 : index === preview.index ? preview.offset :
-            index > preview.index && index <= preview.target ? -preview.rowStep :
-            index < preview.index && index >= preview.target ? preview.rowStep : 0;
-          return (
-            <li key={action} style={{ transform: shift ? `translateY(${shift}px)` : undefined }}
-              className={`relative flex h-11 items-center gap-1 rounded-(--r-sm) bg-s3 pl-3 pr-1 motion-safe:transition-transform motion-safe:duration-150 ${lifted ? "z-10 shadow-md !transition-none" : ""}`}>
-              <span className="min-w-0 flex-1 truncate text-[14px] text-on">{label}</span>
-              <Toggle on={visible} label={`显示${label}`} onChange={(on) => {
-                setPlaybackSidebar((items) => items.map((item) => item.action === action ? { ...item, visible: on } : item));
-              }} />
-              <button type="button" className="grid size-11 shrink-0 touch-none select-none place-items-center text-mut cursor-grab active:cursor-grabbing"
-                aria-label={`拖动排序：${label}`} aria-keyshortcuts="ArrowUp ArrowDown"
-                onPointerDown={(event) => startDrag(event, action, index)}
-                onPointerMove={(event) => {
-                  if (drag.current?.pointer === event.pointerId) drag.current.y = event.clientY;
-                }}
-                onPointerUp={finishDrag} onPointerCancel={finishDrag} onLostPointerCapture={finishDrag}
-                onKeyDown={(event) => {
-                  if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-                  event.preventDefault();
-                  move(action, index + (event.key === "ArrowUp" ? -1 : 1));
-                }}>
-                <IReorder size={17} strokeWidth={1.6} aria-hidden="true" />
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-    </details>
+        <IChevR size={15} className="hg-ios-sidebar-chevron text-mut" aria-hidden="true" />
+      </button>
+      <div className="hg-ios-sidebar-reset-wrap" inert={!expanded}>
+        <CompactAction className="hg-ios-sidebar-reset" tone="neutral" onClick={() => setPlaybackSidebar(() => DEFAULT_PLAYBACK_SIDEBAR)}>恢复默认</CompactAction>
+      </div>
+      <div id={panelId} className="hg-ios-sidebar-collapse" inert={!expanded}>
+        <div className="hg-ios-sidebar-collapse-inner">
+          <ol ref={list} className="mx-3 grid gap-1.5">
+            {playbackSidebar.map(({ action, visible }, index) => {
+              const label = PLAYBACK_SIDEBAR_ACTIONS[action];
+              const lifted = preview?.index === index && preview.offset !== 0;
+              const shift = !preview ? 0 : index === preview.index ? preview.offset :
+                index > preview.index && index <= preview.target ? -preview.rowStep :
+                index < preview.index && index >= preview.target ? preview.rowStep : 0;
+              return (
+                <li key={action} style={{ transform: shift ? `translateY(${shift}px)` : undefined }}
+                  className={`relative flex h-11 items-center gap-1 rounded-(--r-sm) bg-s3 pl-3 pr-1 motion-safe:transition-transform motion-safe:duration-150 ${lifted ? "z-10 shadow-md !transition-none" : ""}`}>
+                  <span className="min-w-0 flex-1 truncate text-[14px] text-on">{label}</span>
+                  <Toggle on={visible} label={`显示${label}`} onChange={(on) => {
+                    setPlaybackSidebar((items) => items.map((item) => item.action === action ? { ...item, visible: on } : item));
+                  }} />
+                  <button type="button" className="grid size-11 shrink-0 touch-none select-none place-items-center text-mut cursor-grab active:cursor-grabbing"
+                    aria-label={`拖动排序：${label}`} aria-keyshortcuts="ArrowUp ArrowDown"
+                    onPointerDown={(event) => startDrag(event, action, index)}
+                    onPointerMove={(event) => {
+                      if (drag.current?.pointer === event.pointerId) drag.current.y = event.clientY;
+                    }}
+                    onPointerUp={finishDrag} onPointerCancel={finishDrag} onLostPointerCapture={finishDrag}
+                    onKeyDown={(event) => {
+                      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+                      event.preventDefault();
+                      move(action, index + (event.key === "ArrowUp" ? -1 : 1));
+                    }}>
+                    <IReorder size={17} strokeWidth={1.6} aria-hidden="true" />
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      </div>
+    </div>
   );
 }

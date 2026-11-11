@@ -19,8 +19,8 @@ export default function AccountCard() {
       </div>
       <button onClick={async () => { await logout(); }}
         className="hg-ios-account-logout grid size-11 shrink-0 place-items-center text-mut pressable" aria-label="退出登录">
-        <span aria-hidden="true" className="grid size-9 place-items-center rounded-full bg-s3">
-          <ILogout size={17} />
+        <span aria-hidden="true" className={`grid size-9 place-items-center bg-s3 ${isIos ? "rounded-(--r-ctl)" : "rounded-full"}`}>
+          <ILogout size={isIos ? 16 : 17} />
         </span>
       </button>
     </div>

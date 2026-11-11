@@ -42,7 +42,7 @@ export function IOSRanksButton({ overMedia = false }: { overMedia?: boolean }) {
   </button>;
 }
 
-export function IOSPageBar({ label, onBack, children, startAction, endAction, overMedia = false, fillTrailing = false, overlay = false, hidden = false }: {
+export function IOSPageBar({ label, onBack, children, startAction, endAction, overMedia = false, fillTrailing = false, overlay = false, hidden = false, priority }: {
   label: string;
   onBack?: () => void;
   children?: ReactNode;
@@ -52,12 +52,13 @@ export function IOSPageBar({ label, onBack, children, startAction, endAction, ov
   fillTrailing?: boolean;
   overlay?: boolean;
   hidden?: boolean;
+  priority?: number;
 }) {
   const { host, active, account } = useIOSNavigation();
   const trailing = endAction ?? (overlay ? undefined : account);
   const bar = (
     <div role="group" aria-label={label}
-      data-overlay={overlay}
+      data-overlay={overlay} data-nav-priority={priority ?? (overlay ? 1 : 0)}
       className={`hg-ios-compact-header hg-ios-floating-bar ${children ? "hg-ios-floating-bar-centered" : ""} ${fillTrailing && !trailing ? "hg-ios-floating-bar-fill-trailing" : ""} ${overMedia ? "hg-clear-chrome hg-ios-floating-bar-over-media" : ""}`}>
       {(onBack || startAction) && <div className="hg-ios-floating-actions">{onBack ? <IOSBackButton onBack={onBack} overMedia={overMedia} /> : startAction}</div>}
       {children && <div className="hg-ios-floating-panel">{children}</div>}

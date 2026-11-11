@@ -1,8 +1,10 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import { IOS_LAYOUT_CHANGE } from "../iosGeometry";
 import { edgeSwipeSide } from "./edgeSwipe";
+import { IOSSegmentFrame, paintSegment, segmentRect } from "./IOSSegments";
 
-type Drag = { id: number; x: number; y: number; lastX: number; time: number; velocity: number; width: number; target: number; offset: number | null };
+type Destination = { index: number; direction: -1 | 1 };
+type Drag = { id: number; x: number; y: number; lastX: number; time: number; velocity: number; width: number; target: Destination; offset: number | null };
 type Options = { index: number; count: number; onChange: (index: number) => void; enabled: boolean };
 const easing = "cubic-bezier(.2,0,.2,1)";
 
@@ -11,9 +13,10 @@ export function useIOSTabSwipe({ index, count, onChange, enabled }: Options) {
   const viewport = useRef<HTMLDivElement>(null);
   const segments = useRef<HTMLDivElement>(null);
   const indicator = useRef<HTMLSpanElement>(null);
-  const [target, setTarget] = useState<number | null>(null);
-  const [busy, setBusy] = useState(false);
-  const pending = useRef<number | null>(null);
+  const [preview, setPreview] = useState<Destination | null>(null);
+  const target = preview?.index ?? null;
+  const busy = preview !== null;
+  const pending = useRef<Destination | null>(null);
   const drag = useRef<Drag | null>(null);
   const offset = useRef(0);
   const animations = useRef<Animation[]>([]);
@@ -22,25 +25,15 @@ export function useIOSTabSwipe({ index, count, onChange, enabled }: Options) {
   const commit = useRef(onChange);
   commit.current = onChange;
 
-  const thumb = (distance: number, destination = pending.current) => {
-    const root = segments.current;
-    if (!root) return null;
-    const buttons = root.querySelectorAll<HTMLButtonElement>(":scope > button");
-    const from = buttons[index], to = buttons[destination ?? index];
-    if (!from || !to) return null;
-    const origin = root.getBoundingClientRect(), a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+  const thumb = (distance: number, destination = pending.current?.index) => {
     const width = viewport.current?.clientWidth || 1;
     const progress = Math.min(1, Math.abs(distance) / width);
-    return { x: a.left - origin.left + (b.left - a.left) * progress, width: a.width + (b.width - a.width) * progress };
+    return segmentRect(segments.current, index, destination ?? index, progress);
   };
   const draw = (distance: number) => {
     offset.current = distance;
     viewport.current?.style.setProperty("--hg-tab-offset", `${distance}px`);
-    const rect = thumb(distance);
-    if (rect && indicator.current) {
-      indicator.current.style.transform = `translateX(${rect.x}px)`;
-      indicator.current.style.width = `${rect.width}px`;
-    }
+    paintSegment(indicator.current, thumb(distance));
   };
   const cancel = () => {
     generation.current++;
@@ -48,8 +41,7 @@ export function useIOSTabSwipe({ index, count, onChange, enabled }: Options) {
     animations.current = [];
     drag.current = null;
     pending.current = null;
-    setTarget(null);
-    setBusy(false);
+    setPreview(null);
     draw(0);
   };
   useLayoutEffect(() => {
@@ -86,12 +78,12 @@ export function useIOSTabSwipe({ index, count, onChange, enabled }: Options) {
     draw(offset.current);
   });
 
-  const settle = (destination: number, accepted: boolean) => {
+  const settle = (destination: Destination, accepted: boolean) => {
     const root = viewport.current;
     if (!root) { cancel(); return; }
     const revision = ++generation.current;
     const width = root.clientWidth;
-    const direction = destination > index ? 1 : -1;
+    const { direction } = destination;
     const start = offset.current;
     const end = accepted ? -direction * width : 0;
     const fromThumb = thumb(start), toThumb = thumb(end);
@@ -100,12 +92,11 @@ export function useIOSTabSwipe({ index, count, onChange, enabled }: Options) {
       if (accepted) {
         // Keep the incoming pane and final frame until the owner commits index.
         // Resetting CSS or unmounting it here exposes the old pane between commits.
-        commit.current(destination);
+        commit.current(destination.index);
         return;
       }
       pending.current = null;
-      setTarget(null);
-      setBusy(false);
+      setPreview(null);
       offset.current = 0;
     };
     draw(end);
@@ -127,11 +118,11 @@ export function useIOSTabSwipe({ index, count, onChange, enabled }: Options) {
     !!viewport.current?.getClientRects().length && !document.querySelector(".hg-cover-menu-layer");
   const select = (next: number) => {
     if (!available() || busy || pending.current !== null || next === index || next < 0 || next >= count) return;
-    pending.current = next;
-    setTarget(next);
-    setBusy(true);
+    const destination: Destination = { index: next, direction: next > index ? 1 : -1 };
+    pending.current = destination;
+    setPreview(destination);
     const revision = generation.current;
-    requestAnimationFrame(() => { if (generation.current === revision && pending.current === next) settle(next, true); });
+    requestAnimationFrame(() => { if (generation.current === revision && pending.current === destination) settle(destination, true); });
   };
   const onDown = (event: PointerEvent<HTMLDivElement>) => {
     // Suppress only the synthetic click from a completed swipe, never a new gesture.
@@ -141,8 +132,9 @@ export function useIOSTabSwipe({ index, count, onChange, enabled }: Options) {
     if (!(element instanceof Element) || element.closest("input,textarea,select,[contenteditable],[data-dialog-backdrop]")) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const side = edgeSwipeSide(event.clientX - bounds.left, bounds.width, event.currentTarget, 20);
-    const next = index + side;
-    if (!side || next < 0 || next >= count) return; // Boundary keeps the existing back gesture.
+    if (!side || count < 2) return;
+    // Pane travel follows the gesture, including last→first and first→last.
+    const next: Destination = { index: (index + side + count) % count, direction: side };
     drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, lastX: event.clientX,
       time: event.timeStamp, velocity: 0, width: bounds.width, target: next, offset: null };
     event.stopPropagation(); // Parent back gestures must not also claim this pointerdown.
@@ -152,13 +144,12 @@ export function useIOSTabSwipe({ index, count, onChange, enabled }: Options) {
     if (!start || start.id !== event.pointerId) return;
     if (!available()) { if (pending.current !== null) cancel(); else drag.current = null; return; }
     const dx = event.clientX - start.x, dy = Math.abs(event.clientY - start.y);
-    const direction = start.target > index ? 1 : -1;
+    const { direction } = start.target;
     if (start.offset === null) {
       if (Math.max(Math.abs(dx), dy) < 8) return;
       if (-direction * dx <= dy * 1.2) { drag.current = null; return; }
       pending.current = start.target;
-      setTarget(start.target);
-      setBusy(true);
+      setPreview(start.target);
       event.currentTarget.setPointerCapture(event.pointerId);
     }
     const elapsed = event.timeStamp - start.time;
@@ -175,7 +166,7 @@ export function useIOSTabSwipe({ index, count, onChange, enabled }: Options) {
     if (!start || start.id !== event.pointerId) return;
     drag.current = null;
     if (start.offset === null) return;
-    const direction = start.target > index ? 1 : -1;
+    const { direction } = start.target;
     const speed = event.timeStamp - start.time > 100 ? 0 : -direction * start.velocity;
     const distance = Math.abs(start.offset);
     const accepted = event.type === "pointerup" && ((distance >= Math.min(96, start.width / 4) && speed >= -.2) || (distance >= 24 && speed > .45));
@@ -184,7 +175,7 @@ export function useIOSTabSwipe({ index, count, onChange, enabled }: Options) {
     event.stopPropagation();
     settle(start.target, accepted);
   };
-  return { index, count, target, busy, enabled, viewport, segments, indicator, select, observe, refresh: () => draw(offset.current),
+  return { index, count, target, direction: preview?.direction ?? 0, busy, enabled, viewport, segments, indicator, select, observe, refresh: () => draw(offset.current),
     gesture: { onPointerDown: onDown, onPointerMove: onMove, onPointerUp: onEnd, onPointerCancel: onEnd,
       onLostPointerCapture: (event: PointerEvent<HTMLDivElement>) => { if (event.target === event.currentTarget) onEnd(event); },
       onClickCapture: (event: React.MouseEvent<HTMLDivElement>) => {
@@ -196,20 +187,17 @@ type Controller = ReturnType<typeof useIOSTabSwipe>;
 export function IOSSwipeSegments({ controller, label, children, className = "" }: {
   controller: Controller; label: string; children: ReactNode; className?: string;
 }) {
-  useLayoutEffect(() => { controller.refresh(); });
-  return <div ref={controller.segments} role="group" aria-label={label} className={`hg-ios-segments hg-ios-swipe-segments ${className}`}>
-    <span ref={controller.indicator} aria-hidden="true" className="hg-ios-swipe-indicator" />
-    {children}
-  </div>;
+  return <IOSSegmentFrame rootRef={controller.segments} indicatorRef={controller.indicator} label={label}
+    className={className} refresh={controller.refresh}>{children}</IOSSegmentFrame>;
 }
 
 export function IOSTabPages({ controller, children }: { controller: Controller; children: (index: number, committed: boolean) => ReactNode }) {
-  const { index, target, busy } = controller;
+  const { index, target, busy, direction } = controller;
   const pages = target === null || target === index ? [index] : [index, target];
   useLayoutEffect(() => controller.observe(), [controller.index, controller.count, controller.enabled]);
   return <div ref={controller.viewport} data-hg-tab-viewport aria-busy={busy} className="hg-ios-tab-viewport" {...controller.gesture}>
     {pages.map((page) => <div key={page} data-hg-tab-pane={page} className="hg-ios-tab-pane" inert={page !== index}
-      style={{ "--hg-tab-step": page === index ? 0 : page > index ? 1 : -1 } as CSSProperties}>
+      style={{ "--hg-tab-step": page === index ? 0 : direction } as CSSProperties}>
       {children(page, page === index)}
     </div>)}
   </div>;

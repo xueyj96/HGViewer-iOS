@@ -51,10 +51,12 @@ function TabBar({ overPlayback = false }: { overPlayback?: boolean }) {
       <div className="flex items-center px-1" style={isIos ? undefined : { height: MOBILE_TAB_HEIGHT }}>
         {WORKSPACE_TABS.filter(({ k }) => !isIos || k !== "search").map(({ k, label, Icon, SelectedIcon }) => {
           const on = tab === k || (isIos && k === "home" && tab === "search");
-          const Glyph = on ? SelectedIcon : Icon;
           return (
             <button key={k} aria-label={label} aria-current={on ? "page" : undefined} onClick={() => navigateToTab(setTab, k)} className="flex-1 h-full flex items-center justify-center pressable">
-              {isIos && <Glyph size={21} />}
+              {isIos && <span aria-hidden="true" data-selected={on} data-static={Icon === SelectedIcon} className="hg-ios-tab-glyph">
+                <Icon size={14} />
+                {Icon !== SelectedIcon && <SelectedIcon size={14} />}
+              </span>}
               <span className="text-[12.5px] leading-none transition-colors duration-200"
                 style={isIos ? undefined : {
                   fontWeight: on ? 700 : 400,

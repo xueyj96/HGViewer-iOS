@@ -1304,15 +1304,19 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           disabled={holdSpeed}
           onClick={() => { if (speedLock) setSpeedLock(false); else setRate(1); }}
           className={`hg-speed-indicator ${isIos ? "hg-ios-speed-dismiss" : ""} absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30
-            flex items-center gap-2 whitespace-nowrap rounded-full px-4 h-10 text-[12px] font-semibold
+            flex items-center whitespace-nowrap font-semibold
+            ${isIos ? "" : "gap-2 rounded-full px-4 h-10 text-[12px]"}
             ${holdSpeed ? "pointer-events-none" : "pressable"}
-            ${lockArmed || speedLock ? "bg-primary text-on-primary" : "hg-chip-strong"}`}>
-          <span className={isIos ? "hg-ios-speed-dismiss-face" : "contents"}>
-          {lockArmed || speedLock ? <ILockF size={16} /> : <IBoltF size={15} />}
-          <span>
-            {effRate}× {holdSpeed
-              ? (lockArmed ? "松手锁定" : "上滑锁定")
-              : (speedLock ? "已锁定 · 点按解除" : "倍速 · 点按恢复")}
+            ${isIos ? "" : lockArmed || speedLock ? "bg-primary text-on-primary" : "hg-chip-strong"}`}>
+          <span className={isIos ? `hg-ios-speed-dismiss-face ${lockArmed || speedLock ? "bg-primary text-on-primary" : "hg-chip-strong"}` : "contents"}>
+          <span className={isIos ? "hg-ios-speed-copy" : "contents"}>
+            {isIos && <span aria-hidden="true" className="hg-ios-speed-measure invisible">{effRate}× 已锁定 · 点按解除</span>}
+            <span className={isIos ? "hg-ios-speed-current" : "contents"}>
+              {lockArmed || speedLock ? <ILockF size={16} /> : <IBoltF size={isIos ? 16 : 15} />}
+              <span>{effRate}× {holdSpeed
+                ? (lockArmed ? "松手锁定" : "上滑锁定")
+                : (speedLock ? "已锁定 · 点按解除" : "倍速 · 点按恢复")}</span>
+            </span>
           </span>
           </span>
         </button>
@@ -1354,7 +1358,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 const i = seq.indexOf(rate);
                 setRate(seq[(i + 1) % seq.length]);
               }}
-              className={`ml-auto shrink-0 flex items-center gap-1 px-2.5 h-8 rounded-full text-[12px] font-bold pressable ${isIos ? "hg-ios-full-action" : ""} ${effRate !== 1 ? "bg-primary text-on-primary" : "hg-chip hg-ink-2"}`}>
+              data-active={effRate !== 1}
+              className={`ml-auto shrink-0 flex items-center text-[12px] font-bold pressable ${isIos ? "hg-ios-full-action" : `gap-1 px-2.5 h-8 rounded-full ${effRate !== 1 ? "bg-primary text-on-primary" : "hg-chip hg-ink-2"}`}`}>
               <span className={isIos ? "hg-ios-full-action-face" : "contents"}><IBoltF size={12} />{effRate}x</span>
             </button>
             <span className="shrink-0 text-[11.5px] hg-ink-4 tabular-nums">{fmtTime(duration)}</span>
