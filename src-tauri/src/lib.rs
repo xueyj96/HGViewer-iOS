@@ -55,6 +55,8 @@ fn allowed_frontend_origin(origin: &str) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "ios")]
+    ios_download_background::register_launch_handler();
     tauri::Builder::default()
         .plugin(
             tauri_plugin_opener::Builder::new()
@@ -84,6 +86,7 @@ pub fn run() {
                     Err(_) => offline_root,
                 };
                 app.state::<offline::Cache>().bind(offline_root);
+                #[cfg(not(target_os = "ios"))]
                 offline::fill_slots(app.handle());
             }
             Ok(())

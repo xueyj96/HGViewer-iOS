@@ -67,7 +67,8 @@ export type OfflineEpisode = { id: number; ep: number; title: string; bytes: num
 export type RecentPlayback = { key: number; id: number; ep: number; title: string; bytes: number; needs_fill?: boolean };
 export type OfflineJob = {
   id: number; title: string; cover?: string | null; ep: number; done: number; total: number; message: string;
-  transfer_done?: number; transfer_total?: number; bytes_per_second?: number;
+  transfer_done?: number; transfer_total?: number; bytes_per_second?: number | null; episode_eta_seconds?: number | null;
+  network_bytes_per_second?: number | null;
   running: boolean; queued: boolean; paused: boolean; stopping: boolean; watch_key?: number | null; needs_fill?: boolean;
 };
 export type DownloadSettings = { limit: number; segments: number; allow_background: boolean; background_supported: boolean };

@@ -5,10 +5,15 @@ use tauri::{AppHandle, Manager};
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
 extern "C" {
+    fn hg_register_download_launch();
     fn hg_request_background_download();
     fn hg_refresh_download_background_policy();
     fn hg_observe_download_foreground();
     fn hg_download_status() -> std::ffi::c_int;
+}
+
+pub fn register_launch_handler() {
+    unsafe { hg_register_download_launch() };
 }
 
 pub fn bind(app: &AppHandle) {
@@ -74,6 +79,18 @@ extern "C" fn hg_download_foreground() {
 }
 
 #[no_mangle]
+extern "C" fn hg_download_has_background_work() -> std::ffi::c_int {
+    i32::from(APP.get().is_some_and(|app| {
+        crate::offline::has_background_work(&app.state::<crate::offline::Cache>())
+    }))
+}
+
+#[no_mangle]
+extern "C" fn hg_download_resume_background() -> std::ffi::c_int {
+    i32::from(APP.get().is_some_and(crate::offline::resume_background))
+}
+
+#[no_mangle]
 extern "C" fn hg_download_log(event: std::ffi::c_int, code: i64) {
     let (name, detail) = match event {
         1 => ("background_registered", None),
@@ -84,6 +101,10 @@ extern "C" fn hg_download_log(event: std::ffi::c_int, code: i64) {
         6 => ("background_expired_inactive", None),
         7 if code == 1 => ("background_finished", None),
         7 => ("background_failed", None),
+        8 => ("background_recovery_scheduled", None),
+        9 => ("background_recovery_submission_failed", Some(code)),
+        10 => ("background_recovery_expired", None),
+        11 => ("background_recovery_finished", None),
         _ => return,
     };
     if let Some(app) = APP.get() {

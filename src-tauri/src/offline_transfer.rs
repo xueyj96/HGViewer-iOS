@@ -1,6 +1,11 @@
 use super::{check_job, storage_error, Capture, Job};
 use crate::{media, net, network_policy, watch};
-use futures_util::{stream, StreamExt};
+use aes::{
+    cipher::{Block, BlockEncrypt, KeyInit},
+    Aes128,
+};
+use futures_util::{stream::FuturesUnordered, StreamExt};
+use md5::Md5;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{path::Path, sync::Mutex, time::Duration};
@@ -13,6 +18,8 @@ use tokio::{
 const SEG_LIMIT: u64 = 16 * 1024 * 1024;
 const PLAYLIST_LIMIT: u64 = 512 * 1024;
 pub(super) const HLS_CHECKPOINT: &str = ".hls-checkpoint";
+pub(super) const HLS_ASSETS: &str = ".hls-assets";
+pub(super) const HLS_PACKAGE: &str = ".hls-package";
 // Limit media buffers even when several shows are downloading together.
 static SEGMENT_SLOTS: Semaphore = Semaphore::const_new(8);
 
@@ -42,6 +49,7 @@ pub(super) enum FailureReason {
     AddressRejected,
     Http(u16),
     BodyInterrupted,
+    ReadStalled,
     MediaInvalid,
     CaptureUnavailable,
     StorageFull,
@@ -206,7 +214,7 @@ async fn download_response(
     }
     let referer = format!("{origin}/");
     retry_transfer(job, || async {
-        let mut response = net::get(url, Duration::from_secs(20), None, Some(&referer))
+        let mut response = net::get_stream(url, &referer)
             .await
             .map_err(TransferFailure::connect)?;
         if response.status() != 200 {
@@ -216,10 +224,25 @@ async fn download_response(
             return Err("媒体分片或清单过大".into());
         }
         let mut data = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|_| {
-            TransferFailure::transient("媒体下载中断", Duration::ZERO)
-                .with_reason(FailureReason::BodyInterrupted)
-        })? {
+        let max_read = Duration::from_secs(if limit == SEG_LIMIT { 180 } else { 20 });
+        let deadline = tokio::time::Instant::now() + max_read;
+        loop {
+            let chunk = tokio::time::timeout_at(deadline, response.chunk())
+                .await
+                .map_err(|_| {
+                    TransferFailure::transient("媒体下载超时", Duration::ZERO)
+                        .with_reason(FailureReason::Timeout)
+                })?
+                .map_err(|error| {
+                    TransferFailure::transient("媒体下载中断", Duration::ZERO).with_reason(
+                        if error.is_timeout() {
+                            FailureReason::ReadStalled
+                        } else {
+                            FailureReason::BodyInterrupted
+                        },
+                    )
+                })?;
+            let Some(chunk) = chunk else { break };
             check_job(job)?;
             if data.len() as u64 + chunk.len() as u64 > limit {
                 return Err("媒体分片或清单过大".into());
@@ -276,8 +299,7 @@ async fn save_mp4_attempt(
         .map_err(TransferFailure::storage)?;
     {
         let mut progress = job.lock().unwrap();
-        progress.transfer_done = 0;
-        progress.transfer_total = response.content_length().unwrap_or(0);
+        progress.begin_transfer(response.content_length().unwrap_or(0), 512 * 1024);
     }
     let mut prefix = Vec::with_capacity(8);
     let mut bytes = 0u64;
@@ -293,6 +315,7 @@ async fn save_mp4_attempt(
         })?
     {
         check_job(job)?;
+        job.lock().unwrap().record_network_bytes(chunk.len());
         if prefix.len() < 8 {
             let remaining = 8 - prefix.len();
             prefix.extend_from_slice(&chunk[..remaining.min(chunk.len())]);
@@ -305,9 +328,9 @@ async fn save_mp4_attempt(
             .await
             .map_err(TransferFailure::storage)?;
         bytes += chunk.len() as u64;
-        let mut progress = job.lock().unwrap();
-        progress.transfer_done = bytes;
-        progress.record_network_bytes(chunk.len());
+        job.lock()
+            .unwrap()
+            .advance_transfer(chunk.len() as u64, chunk.len() as u64, false);
     }
     if prefix.len() < 8 {
         return Err(
@@ -382,10 +405,14 @@ pub(super) async fn save_video(
     let capture = options.capture;
     let mut base = network_policy::parse_target(url).map_err(|_| "播放地址无效")?;
     if base.path().to_ascii_lowercase().ends_with(".mp4") {
-        if options.resume_episode.is_some() {
-            reset_stage(stage).await?;
-        }
-        let bytes = save_mp4(job, &stage.join("video.mp4"), base.as_str(), origin).await?;
+        let package = if options.resume_episode.is_some() {
+            let package = stage.join(HLS_PACKAGE);
+            reset_stage(&package).await?;
+            package
+        } else {
+            stage.to_owned()
+        };
+        let bytes = save_mp4(job, &package.join("video.mp4"), base.as_str(), origin).await?;
         return Ok((bytes, true));
     }
     let (mut playlist, final_url) =
@@ -458,6 +485,7 @@ pub(super) async fn save_video(
                 index: assets.len(),
                 encryption: encryption.clone(),
                 sequence,
+                signature: None,
             });
             lines.push(PlaylistLine::Asset {
                 init,
@@ -503,25 +531,36 @@ pub(super) async fn save_video(
     if segments == 0 {
         return Err("没有可缓存的视频分片".into());
     }
+    let resumable = options.resume_episode.is_some();
+    let asset_root = if resumable {
+        stage.join(HLS_ASSETS)
+    } else {
+        stage.to_owned()
+    };
+    let mut legacy_matches = false;
     if let Some(ep) = options.resume_episode {
-        let signature = checkpoint_signature(ep, origin, &lines, &assets);
-        if fs::read(stage.join(HLS_CHECKPOINT)).await.ok().as_deref() != Some(signature.as_slice())
-        {
-            reset_stage(stage).await?;
-            fs::write(stage.join(HLS_CHECKPOINT), signature)
-                .await
-                .map_err(TransferFailure::storage)?;
+        let legacy = fs::read(stage.join(HLS_CHECKPOINT)).await.ok();
+        if let Some(previous) = legacy {
+            legacy_matches = previous == checkpoint_signature(ep, origin, &lines, &assets);
+            if !legacy_matches {
+                job.lock().unwrap().checkpoint_changes += 1;
+            }
+        }
+        fs::create_dir_all(&asset_root)
+            .await
+            .map_err(TransferFailure::storage)?;
+        for line in &lines {
+            if let PlaylistLine::Asset { init, index } = line {
+                let asset = &mut assets[*index];
+                asset.signature = Some(asset_signature(ep, origin, *init, asset));
+            }
         }
     }
     let parallelism = options
         .segments
         .clamp(1, super::queue::MAX_SEGMENTS)
         .min(assets.len());
-    {
-        let mut progress = job.lock().unwrap();
-        progress.transfer_done = 0;
-        progress.transfer_total = assets.len() as u64;
-    }
+    job.lock().unwrap().begin_transfer(assets.len() as u64, 3);
     let reservation = SEGMENT_SLOTS.acquire_many(parallelism as u32);
     tokio::pin!(reservation);
     let _slots = loop {
@@ -531,63 +570,111 @@ pub(super) async fn save_video(
         }
     };
     let mut names = vec![None; assets.len()];
-    let mut completed = stream::iter(assets)
-        .map(|asset| load_asset(asset, job, stage, origin, options))
-        .buffer_unordered(parallelism);
+    let checkpoint = resumable.then_some((stage, legacy_matches));
+    let asset_root = asset_root.as_path();
+    let mut pending = assets.into_iter();
+    let load = |asset| load_asset(asset, job, asset_root, origin, options.capture, checkpoint);
+    let mut completed = FuturesUnordered::new();
+    completed.extend(pending.by_ref().take(parallelism).map(load));
+    let mut failure = None;
+    let mut drain_deadline = None;
     let mut bytes = 0;
     loop {
         let result = tokio::select! {
             result = completed.next() => result,
             _ = tokio::time::sleep(Duration::from_millis(250)) => {
                 check_job(job)?;
+                if drain_deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+                    break;
+                }
                 continue;
             }
         };
         let Some(result) = result else { break };
-        let (index, name, data) = result.map_err(|error| {
-            if error.stage == "media" {
-                error.at("hls_asset")
-            } else {
-                error
-            }
-        })?;
-        let size = match data {
-            AssetData::Reused(size) => {
-                job.lock().unwrap().reused_bytes += size;
-                size
-            }
-            AssetData::Downloaded(data) => {
-                let temporary = stage.join(format!(".{index}.part"));
-                fs::write(&temporary, &data)
-                    .await
-                    .map_err(TransferFailure::storage)?;
-                fs::rename(temporary, stage.join(&name))
-                    .await
-                    .map_err(TransferFailure::storage)?;
-                if options.resume_episode.is_some() {
-                    let other = if name.ends_with(".ts") { "mp4" } else { "ts" };
-                    if let Err(error) =
-                        fs::remove_file(stage.join(format!("{index}.{other}"))).await
-                    {
-                        if error.kind() != std::io::ErrorKind::NotFound {
-                            return Err(TransferFailure::storage(error));
-                        }
-                    }
+        let (index, name, data) = match result {
+            Ok(asset) => asset,
+            Err(error) => {
+                let error = if error.stage == "media" {
+                    error.at("hls_asset")
+                } else {
+                    error
+                };
+                if !resumable {
+                    return Err(error);
                 }
-                data.len() as u64
+                // Keep successful siblings from the current batch when a segment fails.
+                failure.get_or_insert(error);
+                drain_deadline
+                    .get_or_insert_with(|| tokio::time::Instant::now() + Duration::from_secs(3));
+                continue;
             }
         };
-        names[index] = Some(name);
+        let (size, reused, source) = match data {
+            AssetData::Reused {
+                size,
+                source,
+                promote,
+            } => {
+                let source = if let Some(signature) = promote {
+                    let destination = asset_root.join(&name);
+                    if source != destination {
+                        let temp = asset_root.join(format!(".{name}.part"));
+                        remove_if_present(&temp).await?;
+                        link_staged_asset(&source, &temp).await?;
+                        prepare_asset_replacement(asset_root, index, &name).await?;
+                        fs::rename(temp, &destination)
+                            .await
+                            .map_err(TransferFailure::storage)?;
+                    }
+                    write_atomic(asset_root, &format!("{index}.digest"), &signature).await?;
+                    destination
+                } else {
+                    source
+                };
+                (size, true, source)
+            }
+            AssetData::Downloaded { data, signature } => {
+                let destination = asset_root.join(&name);
+                if let Some(signature) = signature {
+                    prepare_asset_replacement(asset_root, index, &name).await?;
+                    write_atomic(asset_root, &name, &data).await?;
+                    write_atomic(asset_root, &format!("{index}.digest"), &signature).await?;
+                } else {
+                    write_atomic(asset_root, &name, &data).await?;
+                }
+                (data.len() as u64, false, destination)
+            }
+        };
+        names[index] = Some((name, source));
         bytes += size;
-        job.lock().unwrap().transfer_done += 1;
+        job.lock().unwrap().advance_transfer(1, size, reused);
+        if failure.is_none() {
+            if let Some(asset) = pending.next() {
+                completed.push(load(asset));
+            }
+        }
     }
     check_job(job)?;
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    let package = if resumable {
+        let package = stage.join(HLS_PACKAGE);
+        reset_stage(&package).await?;
+        package
+    } else {
+        stage.to_owned()
+    };
     let mut out = String::new();
     for line in lines {
         match line {
             PlaylistLine::Text(line) => out.push_str(&line),
             PlaylistLine::Asset { init, index } => {
-                let name = names[index].as_deref().ok_or("媒体分片不完整")?;
+                let (name, source) = names[index].as_ref().ok_or("媒体分片不完整")?;
+                if resumable {
+                    check_job(job)?;
+                    link_staged_asset(source, &package.join(name)).await?;
+                }
                 if init {
                     out.push_str(&format!("#EXT-X-MAP:URI=\"{name}\""));
                 } else {
@@ -598,7 +685,7 @@ pub(super) async fn save_video(
         out.push('\n');
     }
     bytes += out.len() as u64;
-    fs::write(stage.join("index.m3u8"), out)
+    fs::write(package.join("index.m3u8"), out)
         .await
         .map_err(TransferFailure::storage)?;
     Ok((bytes, false))
@@ -663,6 +750,80 @@ fn checkpoint_signature(
     hash.finalize().into()
 }
 
+fn asset_signature(ep: u32, origin: &str, init: bool, asset: &Asset) -> [u8; 32] {
+    let mut hash = Sha256::new();
+    hash.update(b"hg-hls-asset-v2");
+    hash.update(ep.to_be_bytes());
+    hash.update(asset.sequence.to_be_bytes());
+    hash.update([u8::from(init), u8::from(network_policy::strict_security())]);
+    let url = media_identity(&asset.url);
+    for value in [origin.as_bytes(), url.as_str().as_bytes()] {
+        hash.update((value.len() as u64).to_be_bytes());
+        hash.update(value);
+    }
+    if let Some(key) = &asset.encryption {
+        hash.update(&key.key);
+        hash.update(
+            key.iv
+                .unwrap_or_else(|| u128::from(asset.sequence).to_be_bytes()),
+        );
+    }
+    hash.finalize().into()
+}
+
+fn media_identity(url: &url::Url) -> url::Url {
+    let mut identity = url.clone();
+    identity.set_fragment(None);
+    let Some(query) = url.query() else {
+        return identity;
+    };
+    let pairs: Vec<_> = query.split('&').collect();
+    let value = |name: &str| {
+        let mut values = pairs.iter().filter_map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            (key == name).then_some(value)
+        });
+        let first = values.next()?;
+        values.next().is_none().then_some(first)
+    };
+    let hex =
+        |value: &str, len| value.len() == len && value.bytes().all(|byte| byte.is_ascii_hexdigit());
+    let ali = value("auth_key").is_some_and(|value| {
+        let parts: Vec<_> = value.split('-').collect();
+        matches!(parts.as_slice(), [time, random, "0", signature]
+            if time.len() == 10 && time.bytes().all(|b| b.is_ascii_digit())
+                && !random.is_empty() && random.bytes().all(|b| b.is_ascii_alphanumeric())
+                && hex(signature, 32))
+    });
+    let tencent =
+        value("txSecret").is_some_and(|v| hex(v, 32)) && value("txTime").is_some_and(|v| hex(v, 8));
+    let cloudfront = url
+        .host_str()
+        .is_some_and(|host| host.ends_with(".cloudfront.net"))
+        && value("Signature").is_some_and(|v| !v.is_empty())
+        && value("Key-Pair-Id").is_some_and(|v| !v.is_empty())
+        && (value("Expires")
+            .is_some_and(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()))
+            || value("Policy").is_some_and(|v| !v.is_empty()));
+    if ali || tencent || cloudfront {
+        let kept: Vec<_> = pairs
+            .into_iter()
+            .filter(|pair| {
+                let key = pair.split_once('=').map_or(*pair, |(key, _)| key);
+                !(ali && key == "auth_key"
+                    || tencent && matches!(key, "txSecret" | "txTime")
+                    || cloudfront
+                        && matches!(
+                            key,
+                            "Signature" | "Key-Pair-Id" | "Expires" | "Policy" | "Hash-Algorithm"
+                        ))
+            })
+            .collect();
+        identity.set_query((!kept.is_empty()).then(|| kept.join("&")).as_deref());
+    }
+    identity
+}
+
 async fn staged_asset(
     stage: &Path,
     index: usize,
@@ -691,27 +852,235 @@ async fn staged_asset(
     Ok(None)
 }
 
+async fn link_staged_asset(source: &Path, destination: &Path) -> Result<(), TransferFailure> {
+    match fs::hard_link(source, destination).await {
+        Ok(()) => Ok(()),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::Unsupported | std::io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            fs::copy(source, destination)
+                .await
+                .map(|_| ())
+                .map_err(TransferFailure::storage)
+        }
+        Err(error) => Err(TransferFailure::storage(error)),
+    }
+}
+
+async fn remove_if_present(path: &Path) -> Result<(), TransferFailure> {
+    match fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(TransferFailure::storage(error)),
+    }
+}
+
+async fn write_atomic(dir: &Path, name: &str, data: &[u8]) -> Result<(), TransferFailure> {
+    let temp = dir.join(format!(".{name}.part"));
+    fs::write(&temp, data)
+        .await
+        .map_err(TransferFailure::storage)?;
+    fs::rename(temp, dir.join(name))
+        .await
+        .map_err(TransferFailure::storage)
+}
+
+async fn prepare_asset_replacement(
+    root: &Path,
+    index: usize,
+    name: &str,
+) -> Result<(), TransferFailure> {
+    // Remove the old stamp before committing any replacement bytes.
+    remove_if_present(&root.join(format!("{index}.digest"))).await?;
+    let other = if name.ends_with(".ts") { "mp4" } else { "ts" };
+    remove_if_present(&root.join(format!("{index}.{other}"))).await
+}
+
 enum AssetData {
-    Reused(u64),
-    Downloaded(Vec<u8>),
+    Reused {
+        size: u64,
+        source: std::path::PathBuf,
+        promote: Option<[u8; 32]>,
+    },
+    Downloaded {
+        data: Vec<u8>,
+        signature: Option<[u8; 32]>,
+    },
 }
 
 async fn load_asset(
     asset: Asset,
     job: &Mutex<Job>,
-    stage: &Path,
+    root: &Path,
     origin: &str,
-    options: TransferOptions,
+    capture: Option<Capture>,
+    checkpoint: Option<(&Path, bool)>,
 ) -> Result<(usize, String, AssetData), TransferFailure> {
     check_job(job)?;
     let index = asset.index;
-    if options.resume_episode.is_some() {
-        if let Some((name, bytes)) = staged_asset(stage, index).await? {
-            return Ok((index, name, AssetData::Reused(bytes)));
+    let signature = asset.signature;
+    if let Some(signature) = signature {
+        if let Ok(stamp) = fs::read(root.join(format!("{index}.digest"))).await {
+            if stamp == signature {
+                if let Some((name, size)) = staged_asset(root, index).await? {
+                    let source = root.join(&name);
+                    job.lock().unwrap().checkpoint_matches += 1;
+                    return Ok((
+                        index,
+                        name,
+                        AssetData::Reused {
+                            size,
+                            source,
+                            promote: None,
+                        },
+                    ));
+                }
+            } else {
+                job.lock().unwrap().checkpoint_changes += 1;
+            }
+        }
+        if let Some((legacy, legacy_matches)) = checkpoint {
+            let staged = if legacy_matches {
+                staged_asset(legacy, index).await?.map(|(name, size)| {
+                    let source = legacy.join(&name);
+                    (name, size, source)
+                })
+            } else {
+                None
+            };
+            let verified = match staged {
+                Some(staged) => Some(staged),
+                None => verify_cdn_checkpoint(&asset, origin, root, legacy).await?,
+            };
+            if let Some((name, size, source)) = verified {
+                check_job(job)?;
+                job.lock().unwrap().checkpoint_matches += 1;
+                return Ok((
+                    index,
+                    name,
+                    AssetData::Reused {
+                        size,
+                        source,
+                        promote: Some(signature),
+                    },
+                ));
+            }
         }
     }
-    let (name, data) = fetch_asset(asset, job, origin, options.capture).await?;
-    Ok((index, name, AssetData::Downloaded(data)))
+    let (name, data) = fetch_asset(asset, job, origin, capture).await?;
+    Ok((index, name, AssetData::Downloaded { data, signature }))
+}
+
+// Some CDN routes expose the wire content checksum as a strong ETag. On the
+// built-in service, verify the full representation before promoting old bytes.
+async fn verify_cdn_checkpoint(
+    asset: &Asset,
+    origin: &str,
+    root: &Path,
+    legacy: &Path,
+) -> Result<Option<(String, u64, std::path::PathBuf)>, TransferFailure> {
+    const CDN: &str = "tp1.drleao.cn";
+    if asset.url.scheme() != "https"
+        || !(net::trusted_auth_origin(origin) || asset.url.host_str() == Some(CDN))
+    {
+        return Ok(None);
+    }
+    let mut candidates = Vec::new();
+    for dir in [root, legacy] {
+        if let Some((name, size)) = staged_asset(dir, asset.index).await? {
+            let source = dir.join(&name);
+            candidates.push((name, size, source));
+        }
+    }
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    let Ok(response) = net::head_media(asset.url.as_str(), &format!("{origin}/")).await else {
+        return Ok(None);
+    };
+    // The network layer validates every redirect. Only accept HTTPS evidence.
+    if response.status() != 200 || response.url().scheme() != "https" {
+        return Ok(None);
+    }
+    let headers = response.headers();
+    if headers.contains_key(reqwest::header::CONTENT_ENCODING) {
+        return Ok(None);
+    }
+    let Some(etag) = headers
+        .get(reqwest::header::ETAG)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix('"')?.strip_suffix('"'))
+        .filter(|value| value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    else {
+        return Ok(None);
+    };
+    let size = headers
+        .get(reqwest::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok()?.parse::<u64>().ok());
+    let etag = etag.to_owned();
+    let encryption = asset.encryption.clone();
+    let sequence = asset.sequence;
+    let matched = tokio::task::spawn_blocking(move || {
+        candidates.into_iter().find(|(_, bytes, source)| {
+            let expected_size = if encryption.is_some() {
+                (bytes / 16 + 1) * 16
+            } else {
+                *bytes
+            };
+            size == Some(expected_size)
+                && checkpoint_md5(source, *bytes, encryption.as_ref(), sequence)
+                    .is_some_and(|digest| digest.eq_ignore_ascii_case(&etag))
+        })
+    })
+    .await
+    .unwrap_or_default();
+    Ok(matched)
+}
+
+fn checkpoint_md5(
+    path: &Path,
+    len: u64,
+    encryption: Option<&Encryption>,
+    sequence: u64,
+) -> Option<String> {
+    use std::io::{BufReader, Read};
+    let mut file = BufReader::new(std::fs::File::open(path).ok()?);
+    let mut hash = Md5::new();
+    if let Some(encryption) = encryption {
+        let cipher = Aes128::new_from_slice(&encryption.key).ok()?;
+        let mut previous = encryption
+            .iv
+            .unwrap_or_else(|| u128::from(sequence).to_be_bytes());
+        let mut encrypt = |mut block: [u8; 16]| {
+            for (byte, prev) in block.iter_mut().zip(previous) {
+                *byte ^= prev;
+            }
+            let mut block = Block::<Aes128>::from(block);
+            cipher.encrypt_block(&mut block);
+            previous = block.into();
+            hash.update(previous);
+        };
+        for _ in 0..len / 16 {
+            let mut block = [0; 16];
+            file.read_exact(&mut block).ok()?;
+            encrypt(block);
+        }
+        let tail = (len % 16) as usize;
+        let mut last = [(16 - tail) as u8; 16];
+        file.read_exact(&mut last[..tail]).ok()?;
+        encrypt(last);
+        if file.read(&mut [0]).ok()? != 0 {
+            return None;
+        }
+    } else {
+        std::io::copy(&mut file, &mut hash)
+            .ok()
+            .filter(|&size| size == len)?;
+    }
+    Some(format!("{:x}", hash.finalize()))
 }
 
 fn media_extension(data: &[u8]) -> Option<&'static str> {
@@ -732,6 +1101,7 @@ struct Asset {
     index: usize,
     encryption: Option<Encryption>,
     sequence: u64,
+    signature: Option<[u8; 32]>,
 }
 
 async fn fetch_asset(
@@ -740,6 +1110,7 @@ async fn fetch_asset(
         index,
         encryption,
         sequence,
+        ..
     }: Asset,
     job: &Mutex<Job>,
     origin: &str,
@@ -748,9 +1119,8 @@ async fn fetch_asset(
     let mut data = download(job, url.as_str(), origin, SEG_LIMIT, capture).await?;
     if let Some(key) = encryption {
         let iv = key.iv.unwrap_or_else(|| u128::from(sequence).to_be_bytes());
-        data = media::aes_cbc_decrypt(&data, &key.key, &iv)
-            .map(media::strip_padding)
-            .ok_or("无法解码视频分片")?;
+        media::aes_cbc_decrypt_in_place(&mut data, &key.key, &iv).ok_or("无法解码视频分片")?;
+        data = media::strip_padding(data);
     }
     if data.is_empty() {
         return Err(TransferFailure::from("媒体分片为空").with_reason(FailureReason::MediaInvalid));
@@ -781,6 +1151,168 @@ mod tests {
         Arc,
     };
     use tokio::{io::AsyncReadExt, net::TcpListener, sync::Barrier};
+
+    #[test]
+    fn checkpoint_digest_reconstructs_the_downloaded_ciphertext() {
+        let path = std::env::temp_dir().join(format!("hg-segment-digest-{}", std::process::id()));
+        let data = b"fixture segment payload";
+        std::fs::write(&path, data).unwrap();
+        let key = Encryption {
+            key: vec![0; 16],
+            iv: None,
+        };
+        let size = data.len() as u64;
+        assert_eq!(
+            checkpoint_md5(&path, size, Some(&key), 7).as_deref(),
+            Some("5511c2790ac5739111d4e224bf06bd08")
+        );
+        assert_ne!(
+            checkpoint_md5(&path, size, Some(&key), 8),
+            checkpoint_md5(&path, size, Some(&key), 7)
+        );
+        assert_eq!(
+            checkpoint_md5(&path, size, None, 7).as_deref(),
+            Some("0cb2097d4bb5f2ac6bc71d197b4683b1")
+        );
+        assert_eq!(checkpoint_md5(&path, size - 1, Some(&key), 7), None);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "uses a slow local HTTP fixture and temporarily disables the network guard"]
+    async fn active_segment_can_finish_after_twenty_seconds() {
+        let root = std::env::temp_dir().join(format!("hg-hls-slow-{}", std::process::id()));
+        fs::create_dir(&root).await.unwrap();
+        network_policy::bind_security(&root);
+        network_policy::set_strict_security(false).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                request.push(socket.read_u8().await.unwrap());
+            }
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\na")
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(11)).await;
+            socket.write_all(b"b").await.unwrap();
+            tokio::time::sleep(Duration::from_secs(11)).await;
+            socket.write_all(b"c").await.unwrap();
+        });
+        let job = Mutex::new(Job::default());
+        let url = format!("{origin}/slow.ts");
+        let body = tokio::time::timeout(
+            Duration::from_secs(30),
+            download(&job, &url, &origin, SEG_LIMIT, None),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(body, b"abc");
+        assert_eq!(job.lock().unwrap().resource_retries, 0);
+        server.await.unwrap();
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "uses an isolated HTTP fixture and temporarily disables the network guard"]
+    async fn legacy_checkpoint_keeps_matching_fragments() {
+        let root = std::env::temp_dir().join(format!("hg-hls-legacy-{}", std::process::id()));
+        fs::create_dir(&root).await.unwrap();
+        network_policy::bind_security(&root);
+        network_policy::set_strict_security(false).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let lines = [
+            PlaylistLine::Text("#EXTM3U".into()),
+            PlaylistLine::Text("#EXTINF:1,".into()),
+            PlaylistLine::Asset {
+                init: false,
+                index: 0,
+            },
+            PlaylistLine::Text("#EXT-X-ENDLIST".into()),
+        ];
+        let asset = Asset {
+            url: format!("{origin}/old.ts").parse().unwrap(),
+            index: 0,
+            encryption: None,
+            sequence: 0,
+            signature: None,
+        };
+        let marker = checkpoint_signature(1, &origin, &lines, &[asset]);
+        fs::write(root.join(HLS_CHECKPOINT), marker).await.unwrap();
+        fs::write(root.join("0.ts"), [0x47; 188]).await.unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                request.push(socket.read_u8().await.unwrap());
+            }
+            assert!(request.starts_with(b"GET /index.m3u8 "));
+            let body = b"#EXTM3U\n#EXTINF:1,\nold.ts\n#EXT-X-ENDLIST\n";
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            socket.write_all(body).await.unwrap();
+            // A matching old checkpoint must not request the asset again.
+            assert!(
+                tokio::time::timeout(Duration::from_millis(300), listener.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        let job = Mutex::new(Job::default());
+        let options = TransferOptions {
+            resume_episode: Some(1),
+            ..TransferOptions::default()
+        };
+        save_video(
+            &job,
+            &root,
+            &format!("{origin}/index.m3u8"),
+            &origin,
+            options,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        assert_eq!(job.lock().unwrap().reused_bytes, 188);
+        assert!(root.join(HLS_ASSETS).join("0.digest").is_file());
+        assert!(root.join(HLS_CHECKPOINT).is_file());
+        assert_eq!(
+            fs::read(root.join(HLS_PACKAGE).join("0.ts")).await.unwrap(),
+            vec![0x47; 188]
+        );
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[test]
+    fn unrecognized_or_duplicate_query_parameters_remain_part_of_identity() {
+        let identity = |value: &str| media_identity(&value.parse().unwrap()).to_string();
+        let first = "https://cdn.example.com/part.ts?quality=high&txTime=71000000&txSecret=00000000000000000000000000000000";
+        let second = "https://cdn.example.com/part.ts?quality=high&txTime=71000100&txSecret=11111111111111111111111111111111";
+        assert_eq!(identity(first), identity(second));
+        assert_ne!(
+            identity(first),
+            identity(&second.replace("quality=high", "quality=low"))
+        );
+        assert_eq!(
+            identity("https://cdn.example.com/part.ts?token=opaque"),
+            "https://cdn.example.com/part.ts?token=opaque"
+        );
+        let duplicate = format!("{first}&txTime");
+        assert_eq!(identity(&duplicate), duplicate);
+    }
 
     #[test]
     fn dns_failures_can_retry_but_address_policy_errors_cannot() {

@@ -28,7 +28,8 @@ mod transfer;
 #[cfg(test)]
 use transfer::{best_variant, save_mp4};
 use transfer::{
-    save_video, wait_to_retry, FailureReason, TransferFailure, TransferOptions, HLS_CHECKPOINT,
+    save_video, wait_to_retry, FailureReason, TransferFailure, TransferOptions, HLS_ASSETS,
+    HLS_CHECKPOINT, HLS_PACKAGE,
 };
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -274,6 +275,35 @@ pub fn log_background(cache: &Cache, event: &'static str, code: Option<i64>) {
 #[cfg(target_os = "ios")]
 pub fn background_allowed(cache: &Cache) -> bool {
     cache.queue.lock().unwrap().pending.allow_background
+}
+
+#[cfg(target_os = "ios")]
+pub fn has_background_work(cache: &Cache) -> bool {
+    cache.queue.lock().unwrap().has_background_work()
+}
+
+#[cfg(target_os = "ios")]
+pub fn resume_background(app: &tauri::AppHandle) -> bool {
+    use tauri::Manager;
+    let cache = app.state::<Cache>();
+    let Ok(root) = cache.root() else { return false };
+    let resumed = cache.queue.lock().unwrap().resume_background(&root);
+    match resumed {
+        Ok(true) => {
+            log_background(&cache, "background_recovery_running", None);
+            fill_slots(app);
+            true
+        }
+        Ok(false) => false,
+        Err(_) => {
+            diagnostics::record(
+                &root,
+                "queue_persist_failed",
+                serde_json::json!({"operation": "background_recovery_resume"}),
+            );
+            false
+        }
+    }
 }
 
 #[cfg(target_os = "ios")]
@@ -713,7 +743,7 @@ pub fn fill_slots(app: &tauri::AppHandle) {
             let attempt = || async {
                 let result = download_entry(&app, &cache, &job, &root, &entry).await;
                 let stage = stage_path(&root, entry.id);
-                if entry.capture.is_some() || !stage.join(HLS_CHECKPOINT).is_file() {
+                if entry.capture.is_some() || !has_staging_checkpoint(&stage) {
                     if let Err(error) = fs::remove_dir_all(&stage).await {
                         if error.kind() != std::io::ErrorKind::NotFound {
                             let progress = job.lock().unwrap().clone();
@@ -913,6 +943,15 @@ fn stage_path(root: &Path, id: i64) -> PathBuf {
     root.join(".partials").join(id.to_string())
 }
 
+const STAGED_EPISODE: &str = ".episode";
+
+fn staged_episode(stage: &Path) -> Option<u32> {
+    std::fs::read_to_string(stage.join(STAGED_EPISODE))
+        .ok()?
+        .parse()
+        .ok()
+}
+
 fn discard_staging(root: &Path, id: i64) {
     if let Err(error) = std::fs::remove_dir_all(stage_path(root, id)) {
         if error.kind() != std::io::ErrorKind::NotFound {
@@ -925,19 +964,28 @@ fn discard_staging(root: &Path, id: i64) {
     }
 }
 
+fn has_staging_checkpoint(stage: &Path) -> bool {
+    stage.join(HLS_CHECKPOINT).is_file() || stage.join(HLS_ASSETS).is_dir()
+}
+
 fn prune_staging(root: &Path, pending: &Pending) {
     let Ok(stages) = std::fs::read_dir(root.join(".partials")) else {
         return;
     };
     for stage in stages.flatten() {
-        let path = stage.path();
-        let queued = stage
+        let staging = stage.path();
+        let id = stage
             .file_name()
             .to_str()
-            .and_then(|name| name.parse::<i64>().ok())
-            .is_some_and(|id| pending.entries.iter().any(|entry| entry.id == id));
-        if !queued || !path.join(HLS_CHECKPOINT).is_file() {
-            let _ = std::fs::remove_dir_all(path);
+            .and_then(|name| name.parse::<i64>().ok());
+        let queued = id.is_some_and(|id| pending.entries.iter().any(|entry| entry.id == id));
+        let committed = id
+            .zip(staged_episode(&staging))
+            .is_some_and(|(id, ep)| path(root, id, ep).join("info.json").is_file());
+        if !queued || committed || !has_staging_checkpoint(&staging) {
+            let _ = std::fs::remove_dir_all(&staging);
+        } else {
+            let _ = std::fs::remove_dir_all(staging.join(HLS_PACKAGE));
         }
     }
 }
@@ -962,7 +1010,17 @@ async fn commit_episode(
         ..options
     };
     if options.resume_episode.is_some() {
+        if staged_episode(&stage).is_some_and(|previous| previous != ep) {
+            if let Err(error) = fs::remove_dir_all(&stage).await {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    return Err(TransferFailure::storage(error));
+                }
+            }
+        }
         fs::create_dir_all(&stage)
+            .await
+            .map_err(TransferFailure::storage)?;
+        fs::write(stage.join(STAGED_EPISODE), ep.to_string())
             .await
             .map_err(TransferFailure::storage)?;
     } else {
@@ -975,6 +1033,11 @@ async fn commit_episode(
     }
     let (bytes, mp4) = save_video(job, &stage, url, origin, options).await?;
     check_job(job)?;
+    let package = if options.resume_episode.is_some() {
+        stage.join(HLS_PACKAGE)
+    } else {
+        stage.clone()
+    };
     let info = Episode {
         id,
         ep,
@@ -984,16 +1047,22 @@ async fn commit_episode(
     };
     let json = serde_json::to_vec(&info)
         .map_err(|_| TransferFailure::from("无法保存缓存信息").at("storage"))?;
-    fs::write(stage.join("info.json"), json)
+    fs::write(package.join("info.json"), json)
         .await
         .map_err(TransferFailure::storage)?;
-    fs::rename(&stage, &dest).await.map_err(|error| {
+    fs::rename(&package, &dest).await.map_err(|error| {
         let mut failure = TransferFailure::storage(error);
         failure.message = "无法完成缓存".into();
         failure
     })?;
     if options.resume_episode.is_some() {
-        let _ = fs::remove_file(dest.join(HLS_CHECKPOINT)).await;
+        if fs::remove_dir_all(&stage).await.is_err() {
+            diagnostics::record(
+                root,
+                "staging_cleanup_failed",
+                serde_json::json!({"operation": "commit"}),
+            );
+        }
     }
     Ok(())
 }
@@ -1099,8 +1168,7 @@ async fn run(
         }
         let mut progress = job.lock().unwrap();
         progress.done += 1;
-        progress.transfer_done = 0;
-        progress.transfer_total = 0;
+        progress.reset_transfer();
     }
     Ok(())
 }
@@ -1475,11 +1543,9 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
-        for playlist_changed in [false, true] {
-            let root = std::env::temp_dir().join(format!(
-                "hg-hls-resume-{}-{playlist_changed}",
-                std::process::id()
-            ));
+        for scenario in ["same", "revision", "signed", "parallel-failure"] {
+            let root = std::env::temp_dir()
+                .join(format!("hg-hls-resume-{}-{scenario}", std::process::id()));
             let cache = Cache::default();
             cache.bind(root.clone());
             network_policy::bind_security(&root);
@@ -1526,17 +1592,23 @@ mod tests {
                             requests.lock().unwrap().push((attempt, target.clone()));
                             let (status, body) = match target.as_str() {
                                 "/index.m3u8" => {
-                                    let query = if attempt > 0 && playlist_changed {
-                                        "?revision=2"
-                                    } else {
-                                        ""
+                                    let query = match (scenario, attempt) {
+                                        ("revision", 1) => "?revision=2",
+                                        ("signed", 0) => "?auth_key=1900000000-0-0-00000000000000000000000000000000",
+                                        ("signed", _) => "?auth_key=1900000100-0-0-11111111111111111111111111111111",
+                                        _ => "",
                                     };
-                                    ("200 OK", format!("#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\na.ts\n#EXTINF:1,\nb.ts{query}\n#EXT-X-ENDLIST\n").into_bytes())
+                                    ("200 OK", format!("#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\na.ts\n#EXTINF:1,\nb.ts{query}\n#EXTINF:1,\nc.ts\n#EXT-X-ENDLIST\n").into_bytes())
+                                }
+                                "/a.ts" if attempt == 0 && scenario == "parallel-failure" => {
+                                    ("404 Not Found", Vec::new())
                                 }
                                 "/a.ts" if attempt == 0 => {
                                     // A slow first segment must not block the second from reaching disk.
-                                    tokio::time::timeout(Duration::from_secs(2), async {
-                                        while !stage.join("1.ts").is_file() {
+                                    tokio::time::timeout(Duration::from_secs(8), async {
+                                        while !stage.join(HLS_ASSETS).join("1.digest").is_file()
+                                            || !stage.join(HLS_ASSETS).join("2.digest").is_file()
+                                        {
                                             tokio::time::sleep(Duration::from_millis(10)).await;
                                         }
                                     })
@@ -1545,7 +1617,16 @@ mod tests {
                                     ("404 Not Found", Vec::new())
                                 }
                                 "/a.ts" => ("200 OK", vec![0x47; 188]),
-                                "/b.ts" => ("200 OK", vec![0x47; 376]),
+                                "/b.ts" => {
+                                    if attempt == 0 && scenario == "parallel-failure" {
+                                        tokio::time::sleep(Duration::from_millis(200)).await;
+                                    }
+                                    ("200 OK", vec![0x47; 376])
+                                }
+                                "/c.ts" => ("200 OK", vec![0x47; 188]),
+                                target if target.starts_with("/b.ts?auth_key=") => {
+                                    ("200 OK", vec![0x47; 376])
+                                }
                                 "/b.ts?revision=2" => ("200 OK", vec![0x47; 564]),
                                 _ => panic!("unexpected fixture request"),
                             };
@@ -1562,7 +1643,7 @@ mod tests {
             let url = format!("{origin}/index.m3u8");
             let job = Mutex::new(Job::default());
             let failed = tokio::time::timeout(
-                Duration::from_secs(4),
+                Duration::from_secs(12),
                 commit_episode(&job, &root, 12, 1, "Fixture", &url, &origin, options),
             )
             .await
@@ -1570,21 +1651,56 @@ mod tests {
             .unwrap_err();
             assert!(matches!(failed.reason, FailureReason::Http(404)));
             assert!(!path(&root, 12, 1).exists());
-            assert_eq!(fs::metadata(stage.join("1.ts")).await.unwrap().len(), 376);
-            fs::write(stage.join("0.ts"), [0x47]).await.unwrap();
+            assert_eq!(
+                fs::metadata(stage.join(HLS_ASSETS).join("1.ts"))
+                    .await
+                    .unwrap()
+                    .len(),
+                376
+            );
+            fs::write(stage.join(HLS_ASSETS).join("0.ts"), [0x47])
+                .await
+                .unwrap();
             let orphan = stage_path(&root, 13);
             fs::create_dir_all(&orphan).await.unwrap();
             fs::write(orphan.join(HLS_CHECKPOINT), [0; 32])
                 .await
                 .unwrap();
+            // An interruption immediately after the package rename can leave
+            // the same episode marked as queued along with its staging files.
+            cache
+                .queue
+                .lock()
+                .unwrap()
+                .change(&root, |pending| {
+                    pending.add(Entry::new(
+                        14,
+                        "Committed".into(),
+                        Some(BTreeSet::from([1, 2])),
+                        None,
+                    ))
+                })
+                .unwrap();
+            let committed_stage = stage_path(&root, 14);
+            fs::create_dir_all(committed_stage.join(HLS_ASSETS))
+                .await
+                .unwrap();
+            fs::write(committed_stage.join(STAGED_EPISODE), "1")
+                .await
+                .unwrap();
+            let committed = path(&root, 14, 1);
+            fs::create_dir_all(&committed).await.unwrap();
+            fs::write(committed.join("info.json"), b"{}").await.unwrap();
 
             let reopened = Cache::default();
             reopened.bind(root.clone());
-            assert!(stage.join("1.ts").is_file());
+            assert!(stage.join(HLS_ASSETS).join("1.ts").is_file());
             assert!(!orphan.exists());
+            assert!(!committed_stage.exists());
+            assert!(committed.join("info.json").is_file());
             let resumed = Mutex::new(Job::default());
             tokio::time::timeout(
-                Duration::from_secs(4),
+                Duration::from_secs(12),
                 commit_episode(&resumed, &root, 12, 1, "Fixture", &url, &origin, options),
             )
             .await
@@ -1592,8 +1708,13 @@ mod tests {
             .unwrap();
             assert_eq!(
                 resumed.lock().unwrap().reused_bytes,
-                if playlist_changed { 0 } else { 376 }
+                match scenario {
+                    "revision" => 188,
+                    "parallel-failure" => 376,
+                    _ => 564,
+                }
             );
+            assert!(!stage.exists());
             let mut second_attempt: Vec<_> = requests
                 .lock()
                 .unwrap()
@@ -1602,8 +1723,10 @@ mod tests {
                 .map(|(_, target)| target.clone())
                 .collect();
             second_attempt.sort();
-            if playlist_changed {
+            if scenario == "revision" {
                 assert_eq!(second_attempt, ["/a.ts", "/b.ts?revision=2", "/index.m3u8"]);
+            } else if scenario == "parallel-failure" {
+                assert_eq!(second_attempt, ["/a.ts", "/c.ts", "/index.m3u8"]);
             } else {
                 assert_eq!(second_attempt, ["/a.ts", "/index.m3u8"]);
             }
@@ -1614,7 +1737,7 @@ mod tests {
             let second = serve(&reopened, "/offline/12/1/1.ts", None).await;
             assert_eq!(
                 second.into_body().len(),
-                if playlist_changed { 564 } else { 376 }
+                if scenario == "revision" { 564 } else { 376 }
             );
             assert!(!stage.exists());
             assert!(!path(&root, 12, 1).join(HLS_CHECKPOINT).exists());

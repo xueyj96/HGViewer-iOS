@@ -47,23 +47,28 @@ fn cache_put<V: Clone>(map: &Mutex<HashMap<String, V>>, key: String, val: V, max
 /* ───────────────────────── AES ───────────────────────── */
 
 pub(crate) fn aes_cbc_decrypt(data: &[u8], key: &[u8], iv: &[u8; 16]) -> Option<Vec<u8>> {
+    let mut data = data.to_vec();
+    aes_cbc_decrypt_in_place(&mut data, key, iv)?;
+    Some(data)
+}
+
+pub(crate) fn aes_cbc_decrypt_in_place(data: &mut [u8], key: &[u8], iv: &[u8; 16]) -> Option<()> {
     if data.is_empty() || data.len() % 16 != 0 {
         return None;
     }
     let cipher = Aes128::new_from_slice(key).ok()?;
     let mut prev = *iv;
-    let mut out = Vec::with_capacity(data.len());
-    for chunk in data.chunks(16) {
+    for chunk in data.chunks_exact_mut(16) {
         let mut ct = [0u8; 16];
         ct.copy_from_slice(chunk);
         let mut block = ct;
         cipher.decrypt_block((&mut block).into());
-        for i in 0..16 {
-            out.push(block[i] ^ prev[i]);
+        for (byte, (decoded, previous)) in chunk.iter_mut().zip(block.into_iter().zip(prev)) {
+            *byte = decoded ^ previous;
         }
         prev = ct;
     }
-    Some(out)
+    Some(())
 }
 
 pub(crate) fn strip_padding(mut buf: Vec<u8>) -> Vec<u8> {

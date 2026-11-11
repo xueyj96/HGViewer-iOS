@@ -56,6 +56,8 @@ pub(super) fn worker(
             "resource_retries": job.resource_retries,
             "reused_bytes": job.reused_bytes,
             "network_bytes": job.network_bytes,
+            "checkpoint_matches": job.checkpoint_matches,
+            "checkpoint_changes": job.checkpoint_changes,
             "last_resource_retry_reason": job.resource_retry_reason,
             "elapsed_ms": elapsed_ms,
             "failure": failure,

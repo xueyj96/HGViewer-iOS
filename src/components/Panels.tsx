@@ -5,7 +5,7 @@ import { handleArticleClick, sanitizeHtml } from "../html";
 import type { Comment, CommentPage, Episode } from "../types";
 import { useStore } from "../store";
 import { Avatar, CompactAction, Empty, PageStatus } from "./ui";
-import { CachedEpisodeMark, CompactDownloadButton } from "./DownloadControls";
+import { CompactDownloadButton } from "./DownloadControls";
 import { useIOSKeyboardViewport } from "./useIOSKeyboardViewport";
 import { IOSPageBar } from "./IOSPageBar";
 import { useIOSNavigation } from "./IOSNavigation";
@@ -55,9 +55,8 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, onC
               <button type="button" key={e.ep_num} onClick={() => onPick(e.ep_num)}
                 aria-current={e.ep_num === current ? "true" : undefined}
                 aria-description={cachedOnly ? "已缓存" : undefined}
-                className={`hg-ios-episode-button flex h-10 items-center justify-center gap-1 rounded-(--r-sm) text-[12px] font-semibold pressable ${e.ep_num === current ? "bg-primary text-on-primary" : "bg-s3 text-on/80"}`}>
+                className={`hg-ios-episode-button flex h-10 items-center justify-center gap-1 rounded-(--r-sm) text-[12px] font-semibold pressable ${e.ep_num === current ? "bg-primary text-on-primary" : cachedOnly ? "bg-primary/10 text-primary" : "bg-s3 text-on/80"}`}>
                 {e.ep_num}
-                {cachedOnly && <CachedEpisodeMark />}
               </button>
             ))}
           </div>

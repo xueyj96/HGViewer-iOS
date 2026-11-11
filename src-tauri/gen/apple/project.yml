@@ -40,7 +40,7 @@ targets:
       path: huangguo-client_iOS/Info.plist
       properties:
         CFBundleDisplayName: HGViewer
-        BGTaskSchedulerPermittedIdentifiers: ["$(PRODUCT_BUNDLE_IDENTIFIER).downloads.*"]
+        BGTaskSchedulerPermittedIdentifiers: ["$(PRODUCT_BUNDLE_IDENTIFIER).downloads.*", "$(PRODUCT_BUNDLE_IDENTIFIER).download-recovery"]
         UIBackgroundModes: [processing]
         LSRequiresIPhoneOS: true
         UILaunchStoryboardName: LaunchScreen
@@ -55,7 +55,7 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: 1.1.0
-        CFBundleVersion: "1.1.87"
+        CFBundleVersion: "1.1.95"
     entitlements:
       path: huangguo-client_iOS/huangguo-client_iOS.entitlements
     scheme:

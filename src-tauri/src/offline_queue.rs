@@ -43,38 +43,103 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
-#[derive(Clone, Default)]
-struct TransferRate(VecDeque<(Instant, u64)>);
+#[derive(Clone)]
+struct ProgressBucket {
+    started: Instant,
+    cached_bytes: u64,
+    network_bytes: u64,
+    downloaded_units: u64,
+}
 
-impl TransferRate {
-    const WINDOW: Duration = Duration::from_secs(3);
+#[derive(Clone)]
+struct TransferWindow {
+    started: Instant,
+    minimum_units: u64,
+    buckets: VecDeque<ProgressBucket>,
+}
 
-    fn record(&mut self, now: Instant, bytes: u64) {
-        while self
-            .0
-            .front()
-            .is_some_and(|(start, _)| now.duration_since(*start) >= Self::WINDOW)
-        {
-            self.0.pop_front();
-        }
-        match self.0.back_mut() {
-            Some((start, count)) if now.duration_since(*start) < Duration::from_millis(500) => {
-                *count += bytes;
-            }
-            _ => self.0.push_back((now, bytes)),
+#[derive(Debug, PartialEq, Eq)]
+struct TransferEstimate {
+    cache_speed: Option<u64>,
+    network_speed: Option<u64>,
+    eta: Option<u64>,
+}
+
+impl TransferWindow {
+    const DURATION: Duration = Duration::from_secs(30);
+
+    fn new(now: Instant, minimum_units: u64) -> Self {
+        Self {
+            started: now,
+            minimum_units,
+            buckets: VecDeque::new(),
         }
     }
 
-    fn per_second(&self, now: Instant) -> u64 {
-        let mut recent = self
-            .0
+    fn record(
+        &mut self,
+        now: Instant,
+        cached_bytes: u64,
+        network_bytes: u64,
+        downloaded_units: u64,
+    ) {
+        while self
+            .buckets
+            .front()
+            .is_some_and(|bucket| now.duration_since(bucket.started) >= Self::DURATION)
+        {
+            self.buckets.pop_front();
+        }
+        if let Some(bucket) = self
+            .buckets
+            .back_mut()
+            .filter(|bucket| now.duration_since(bucket.started) < Duration::from_secs(1))
+        {
+            bucket.cached_bytes += cached_bytes;
+            bucket.network_bytes += network_bytes;
+            bucket.downloaded_units += downloaded_units;
+        } else {
+            self.buckets.push_back(ProgressBucket {
+                started: now,
+                cached_bytes,
+                network_bytes,
+                downloaded_units,
+            });
+        }
+    }
+
+    fn estimate(&self, now: Instant, remaining: u64) -> TransferEstimate {
+        let elapsed = now.duration_since(self.started).min(Self::DURATION);
+        let (cached, network, older_units, recent_units) = self
+            .buckets
             .iter()
-            .filter(|(start, _)| now.duration_since(*start) < Self::WINDOW);
-        let Some((start, first)) = recent.next() else {
-            return 0;
-        };
-        let bytes = first + recent.map(|(_, count)| count).sum::<u64>();
-        (bytes as f64 / now.duration_since(*start).as_secs_f64().max(1.0)) as u64
+            .filter(|bucket| now.duration_since(bucket.started) < Self::DURATION)
+            .fold((0, 0, 0, 0), |(cached, network, older, recent), bucket| {
+                let (older, recent) = if now.duration_since(bucket.started) >= Self::DURATION / 2 {
+                    (older + bucket.downloaded_units, recent)
+                } else {
+                    (older, recent + bucket.downloaded_units)
+                };
+                (
+                    cached + bucket.cached_bytes,
+                    network + bucket.network_bytes,
+                    older,
+                    recent,
+                )
+            });
+        // Use the elapsed portion of the window while the download is starting.
+        let seconds = elapsed.as_secs_f64().max(1.0);
+        let rate = |bytes: u64| (bytes as f64 / seconds) as u64;
+        let full_window = elapsed == Self::DURATION;
+        let units = older_units + recent_units;
+        let steady = older_units.min(recent_units) * 2 >= older_units.max(recent_units);
+        let eta = (full_window && remaining > 0 && units >= self.minimum_units && steady)
+            .then(|| (seconds * remaining as f64 / units as f64).ceil() as u64);
+        TransferEstimate {
+            cache_speed: (full_window || cached > 0).then(|| rate(cached)),
+            network_speed: (full_window || cached > 0 || network > 0).then(|| rate(network)),
+            eta,
+        }
     }
 }
 
@@ -92,9 +157,11 @@ pub(super) struct Job {
     pub total: usize,
     pub transfer_done: u64,
     pub transfer_total: u64,
-    bytes_per_second: u64,
+    bytes_per_second: Option<u64>,
+    network_bytes_per_second: Option<u64>,
+    episode_eta_seconds: Option<u64>,
     #[serde(skip)]
-    rate: TransferRate,
+    transfer_window: Option<TransferWindow>,
     pub message: String,
     pub watch_key: Option<u64>,
     pub needs_fill: bool,
@@ -109,19 +176,49 @@ pub(super) struct Job {
     #[serde(skip)]
     pub network_bytes: u64,
     #[serde(skip)]
+    pub checkpoint_matches: u64,
+    #[serde(skip)]
+    pub checkpoint_changes: u64,
+    #[serde(skip)]
     pub resume_capture_after_stop: bool,
 }
 
 impl Job {
     pub fn record_network_bytes(&mut self, bytes: usize) {
         self.network_bytes += bytes as u64;
-        self.rate.record(Instant::now(), bytes as u64);
+        if let Some(window) = &mut self.transfer_window {
+            window.record(Instant::now(), 0, bytes as u64, 0);
+        }
+    }
+
+    pub fn begin_transfer(&mut self, total: u64, minimum_sample: u64) {
+        self.transfer_done = 0;
+        self.transfer_total = total;
+        self.transfer_window = Some(TransferWindow::new(Instant::now(), minimum_sample));
+    }
+
+    pub fn advance_transfer(&mut self, units: u64, bytes: u64, reused: bool) {
+        self.transfer_done += units;
+        if reused {
+            self.reused_bytes += bytes;
+        }
+        if let Some(window) = &mut self.transfer_window {
+            window.record(Instant::now(), bytes, 0, if reused { 0 } else { units });
+        }
     }
 
     fn snapshot(&self) -> Self {
         let mut snapshot = self.clone();
-        if self.running && !self.stopping && self.message.is_empty() {
-            snapshot.bytes_per_second = self.rate.per_second(Instant::now());
+        if self.running && !self.stopping {
+            if let Some(window) = &self.transfer_window {
+                let estimate = window.estimate(
+                    Instant::now(),
+                    self.transfer_total.saturating_sub(self.transfer_done),
+                );
+                snapshot.bytes_per_second = estimate.cache_speed;
+                snapshot.network_bytes_per_second = estimate.network_speed;
+                snapshot.episode_eta_seconds = estimate.eta;
+            }
         }
         snapshot
     }
@@ -129,7 +226,7 @@ impl Job {
     pub fn reset_transfer(&mut self) {
         self.transfer_done = 0;
         self.transfer_total = 0;
-        self.rate.0.clear();
+        self.transfer_window = None;
     }
 }
 
@@ -320,17 +417,37 @@ impl Queue {
     #[cfg(any(target_os = "ios", test))]
     pub fn resume_foreground(&mut self, root: &Path) -> Result<bool, String> {
         self.backgrounded = false;
-        if !self
-            .pending
-            .entries
-            .iter()
-            .any(|entry| entry.resume_in_foreground)
-        {
+        self.resume_interrupted(root, false)
+    }
+
+    #[cfg(any(target_os = "ios", test))]
+    pub fn has_background_work(&self) -> bool {
+        self.pending.allow_background
+            && self.pending.entries.iter().any(|entry| {
+                entry.capture.is_none() && (!entry.paused || entry.resume_in_foreground)
+            })
+    }
+
+    #[cfg(any(target_os = "ios", test))]
+    pub fn resume_background(&mut self, root: &Path) -> Result<bool, String> {
+        if !self.has_background_work() {
+            return Ok(false);
+        }
+        self.backgrounded = true;
+        self.resume_interrupted(root, true)?;
+        Ok(true)
+    }
+
+    #[cfg(any(target_os = "ios", test))]
+    fn resume_interrupted(&mut self, root: &Path, background: bool) -> Result<bool, String> {
+        let should_resume =
+            |entry: &Entry| entry.resume_in_foreground && (!background || entry.capture.is_none());
+        if !self.pending.entries.iter().any(should_resume) {
             return Ok(false);
         }
         self.change(root, |pending| {
             for entry in &mut pending.entries {
-                if entry.resume_in_foreground {
+                if should_resume(entry) {
                     entry.resume();
                 }
             }
@@ -405,6 +522,8 @@ impl Queue {
             job.resume_capture_after_stop = false;
             job.reused_bytes = 0;
             job.network_bytes = 0;
+            job.checkpoint_matches = 0;
+            job.checkpoint_changes = 0;
             job.resource_retries = 0;
             job.resource_retry_reason = None;
             job.worker_id = super::diagnostics::worker_id();
@@ -643,6 +762,38 @@ mod tests {
     }
 
     #[test]
+    fn scheduled_background_recovery_preserves_user_pauses_and_respects_preference() {
+        let root = temp_root();
+        let mut queue = Queue::default();
+        queue
+            .change(&root, |pending| {
+                pending.add(entry(1, &[2, 3]))?;
+                let mut manual = entry(2, &[1]);
+                manual.paused = true;
+                pending.add(manual)
+            })
+            .unwrap();
+        queue.interrupt_background(&root).unwrap();
+
+        let mut restarted = Queue {
+            pending: Pending::read(&root),
+            ..Queue::default()
+        };
+        restarted.pending.allow_background = false;
+        assert!(!restarted.resume_background(&root).unwrap());
+        assert!(restarted.pending.entries.iter().all(|entry| entry.paused));
+        restarted.pending.allow_background = true;
+        assert!(restarted.resume_background(&root).unwrap());
+        assert!(restarted.backgrounded);
+        let reserved = restarted.reserve();
+        assert_eq!(reserved.len(), 1);
+        assert_eq!(reserved[0].0.id, 1);
+        assert_eq!(reserved[0].0.episodes, Some(BTreeSet::from([2, 3])));
+        assert!(Pending::read(&root).entries[1].paused);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn exhausted_transient_failure_is_retried_on_foreground() {
         let root = temp_root();
         let mut queue = Queue::default();
@@ -672,16 +823,67 @@ mod tests {
     }
 
     #[test]
-    fn transfer_rate_counts_network_bytes_and_decays_after_stall() {
+    fn cache_speed_network_speed_and_eta_share_the_same_window() {
         let start = Instant::now();
-        let mut rate = TransferRate::default();
-        rate.record(start, 1024);
-        rate.record(start + Duration::from_millis(250), 512);
-        rate.record(start + Duration::from_secs(1), 512);
-        assert_eq!(rate.per_second(start + Duration::from_secs(2)), 1024);
-        assert_eq!(rate.per_second(start + Duration::from_secs(4)), 0);
-        rate.record(start + Duration::from_secs(8), 512);
-        assert_eq!(rate.per_second(start + Duration::from_secs(9)), 512);
+        let mut window = TransferWindow::new(start, 3);
+        let estimate = |cache_speed, network_speed, eta| TransferEstimate {
+            cache_speed,
+            network_speed,
+            eta,
+        };
+        assert_eq!(window.estimate(start, 9), estimate(None, None, None));
+        window.record(start + Duration::from_secs(1), 12_000, 15_000, 2);
+        assert_eq!(
+            window.estimate(start + Duration::from_secs(2), 9),
+            estimate(Some(6_000), Some(7_500), None)
+        );
+        window.record(start + Duration::from_secs(28), 18_000, 21_000, 3);
+        assert_eq!(
+            window.estimate(start + Duration::from_secs(30), 10),
+            estimate(Some(1_000), Some(1_200), Some(60))
+        );
+        assert_eq!(
+            window.estimate(start + Duration::from_secs(40), 10),
+            estimate(Some(600), Some(700), None)
+        );
+        assert_eq!(
+            window.estimate(start + Duration::from_secs(58), 10),
+            estimate(Some(0), Some(0), None)
+        );
+    }
+
+    #[test]
+    fn reused_segments_count_only_toward_cache_speed() {
+        let mut job = Job {
+            running: true,
+            ..Job::default()
+        };
+        job.begin_transfer(20, 3);
+        job.advance_transfer(10, 10_000, true);
+        assert_eq!(job.transfer_done, 10);
+        assert_eq!(job.reused_bytes, 10_000);
+        let snapshot = job.snapshot();
+        assert_eq!(snapshot.bytes_per_second, Some(10_000));
+        assert_eq!(snapshot.network_bytes_per_second, Some(0));
+        assert_eq!(snapshot.episode_eta_seconds, None);
+        let window = job.transfer_window.as_ref().unwrap();
+        assert_eq!(window.buckets[0].downloaded_units, 0);
+        job.reset_transfer();
+        assert!(job.transfer_window.is_none());
+    }
+
+    #[test]
+    fn network_bytes_are_visible_before_the_first_cache_write() {
+        let mut job = Job {
+            running: true,
+            ..Job::default()
+        };
+        job.begin_transfer(20, 3);
+        job.record_network_bytes(2_000);
+        let snapshot = job.snapshot();
+        assert_eq!(snapshot.bytes_per_second, None);
+        assert_eq!(snapshot.network_bytes_per_second, Some(2_000));
+        assert_eq!(snapshot.transfer_done, 0);
     }
 
     #[test]

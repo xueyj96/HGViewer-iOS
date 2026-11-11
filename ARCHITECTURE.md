@@ -24,6 +24,14 @@ HGViewer 用 React 渲染界面，Tauri 负责 WebView 与 Rust 的通信。iOS 
 
 前端通过 Tauri 命令请求站点数据。媒体和封面使用本地协议，协议地址由平台决定。修改协议地址或路径时同时检查 Rust 端的注册和播放列表改写。离线任务队列与传输实现分开；iOS 背景下载见 [ios_download_background.rs](src-tauri/src/ios_download_background.rs)。覆盖安装须沿用设备上现有的 Bundle Identifier 和签名身份，安装前后读回构建号与数据清单。清理工作区产物与清理手机缓存是两项独立操作。
 
+## 下载与续传
+
+`useOfflineStatus` 共用一份状态快照和轮询，封面与详情使用相同的速度读数。缓存速度包含新写入和已验证复用的数据，网络速度只统计收到的数据，两者使用最近 30 秒的窗口。
+
+`offline_transfer` 保存完整分片和摘要，恢复时先检查本地数据。内置线路可通过上游内容摘要复核变更地址后的分片。全局分片缓冲并发上限为 8，单片上限为 16 MiB，AES 解密复用原缓冲区。整集提交后删除对应暂存，启动时清理已完成集的残留。
+
+`ios_download_background.m` 管理持续后台任务和设备空闲时的恢复调度。恢复注册在 iOS 入口完成，队列选择由 Rust 持久化。手动暂停和关闭后台下载会阻止恢复。系统调度时间和锁屏行为需要真机验证。
+
 ## 构建与验证
 
 本地环境和构建命令见 [README](README.md)。iOS 应用显示版本与构建号是两个字段，发版以 Xcode 工程的 `CFBundleVersion` 和 Release 标签为准。

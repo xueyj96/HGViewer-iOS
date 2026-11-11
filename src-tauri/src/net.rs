@@ -196,14 +196,38 @@ pub async fn get(
     accept: Option<&str>,
     referer: Option<&str>,
 ) -> Result<reqwest::Response, String> {
-    get_inner(raw, timeout, Some(timeout), accept, referer, None).await
+    get_inner(
+        reqwest::Method::GET,
+        raw,
+        timeout,
+        Some(timeout),
+        accept,
+        referer,
+        None,
+    )
+    .await
 }
 
 pub async fn get_stream(raw: &str, referer: &str) -> Result<reqwest::Response, String> {
     get_inner(
+        reqwest::Method::GET,
         raw,
         Duration::from_secs(20),
         None,
+        None,
+        Some(referer),
+        None,
+    )
+    .await
+}
+
+pub async fn head_media(raw: &str, referer: &str) -> Result<reqwest::Response, String> {
+    let timeout = Duration::from_secs(4);
+    get_inner(
+        reqwest::Method::HEAD,
+        raw,
+        timeout,
+        Some(timeout),
         None,
         Some(referer),
         None,
@@ -218,6 +242,7 @@ pub async fn get_playback_stream(
     range: Option<&str>,
 ) -> Result<reqwest::Response, String> {
     get_inner(
+        reqwest::Method::GET,
         raw,
         Duration::from_secs(20),
         None,
@@ -229,6 +254,7 @@ pub async fn get_playback_stream(
 }
 
 async fn get_inner(
+    method: reqwest::Method,
     raw: &str,
     timeout: Duration,
     request_timeout: Option<Duration>,
@@ -240,7 +266,7 @@ async fn get_inner(
         let mut next = network_policy::parse_target(raw)?;
         for hop in 0..=5 {
             let (target, http) = client_for(next.as_str()).await?;
-            let mut request = http.get(target.clone());
+            let mut request = http.request(method.clone(), target.clone());
             if let Some(timeout) = request_timeout {
                 request = request.timeout(timeout);
             }
@@ -254,6 +280,8 @@ async fn get_inner(
                 request = request
                     .header("Range", value)
                     .header("Accept-Encoding", "identity");
+            } else if method == reqwest::Method::HEAD {
+                request = request.header("Accept-Encoding", "identity");
             }
             let response = request.send().await.map_err(|e| err_text(&e))?;
             if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
