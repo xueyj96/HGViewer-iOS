@@ -80,7 +80,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [duration, setDuration] = useState(0);
   const [vsize, setVsize] = useState({ w: 0, h: 0 });
   const [buffered, setBuffered] = useState(0);
-  const [paused, setPaused] = useState(false);
+  // Opening the app is not playback intent. Once someone starts the home
+  // feed, later items keep its usual continuous playback behavior.
+  const playbackStarted = useRef(mode !== "home");
+  const [paused, setPaused] = useState(mode === "home");
   const [clear, setClear] = useState(false);
   const [rate, setRate] = useState(1);
   const [waiting, setWaiting] = useState(false);
@@ -112,6 +115,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   /* 观看进度：onTime 里节流写回 store，卸载时再兜一次 */
   const liveRef = useRef({ key: "", id: 0, ep: 1, dur: 0, t: 0, dirty: false });
   const lastSaveRef = useRef(0);
+  const historyPlayback = useRef<string | undefined>(undefined);
   const theater = store.theater;
   const setTheater = store.setTheater;
   const fs = store.fs;
@@ -203,10 +207,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const onTimeTick = (t: number) => {
     const current = liveRef.current;
     const dur = current.key === playKey ? current.dur : 0;
-    liveRef.current = { key: playKey, id: curId, ep: curEp, dur, t, dirty: true };
+    const record = active && historyPlayback.current === playKey;
+    liveRef.current = { key: playKey, id: curId, ep: curEp, dur, t, dirty: record };
     setTime(t);
     const now = Date.now();
-    if (dur > 0 && now - lastSaveRef.current > 5000) {
+    if (record && dur > 0 && now - lastSaveRef.current > 5000) {
       lastSaveRef.current = now;
       addHistory(curId, curEp, t, dur);
       liveRef.current.dirty = false;
@@ -373,7 +378,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         if (!alive) return;
         setCacheChoice({ key: surfaceKey, episode });
         if (episode) {
-          addHistory(curId, curEp);
           return;
         }
       }
@@ -385,7 +389,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         : await resolveStream(curId, curEp);
       if (!alive) return;
       setPlayUrls((m) => ({ ...m, [playKey]: resolved }));
-      addHistory(curId, curEp);
     };
     void resolve().catch((e) => { if (alive) setErr((e as Error).message || "取播放地址失败"); });
     return () => { alive = false; };
@@ -409,6 +412,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   };
 
   const retryPlayback = () => {
+    playbackStarted.current = true;
     setErr(""); setWaiting(true); setPaused(false);
     if (kind === "post") {
       setPosts(({ [curId]: _discard, ...remaining }) => remaining);
@@ -420,7 +424,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   /* 切换条目/集数时重置播放状态 */
   useEffect(() => {
-    setTime(0); setDuration(0); setBuffered(0); setErr(""); setWaiting(true); setPaused(false); setDescOpen(false);
+    setTime(0); setDuration(0); setBuffered(0); setErr("");
+    setWaiting(playbackStarted.current); setPaused(!playbackStarted.current); setDescOpen(false);
     setVsize({ w: 0, h: 0 });
     if (gesture.current?.timer) window.clearTimeout(gesture.current.timer);
     gesture.current = null;
@@ -448,14 +453,18 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   }, [active, curId, curEp, playKey]);
 
   useLayoutEffect(() => {
+    historyPlayback.current = undefined;
     if (!active) return;
     lastSaveRef.current = 0;
     return () => {
       const progress = liveRef.current;
-      if (progress.key === playKey && progress.dur > 0 && progress.dirty) {
-        addHistory(progress.id, progress.ep, progress.t, progress.dur);
+      if (progress.key === playKey) {
+        if (historyPlayback.current === playKey && progress.dur > 0 && progress.dirty) {
+          addHistory(progress.id, progress.ep, progress.t, progress.dur);
+        }
         progress.dirty = false;
       }
+      historyPlayback.current = undefined;
     };
   }, [active, playKey, addHistory]);
 
@@ -514,7 +523,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const nextEpisode = currentEpisodeIndex >= 0 ? orderedEpisodes[currentEpisodeIndex + 1] : undefined;
 
   // Keep the adjacent works and episodes ready after the current item starts playing.
-  const readyToPreload = isIos && active && duration > 0 && !waiting && !err;
+  const readyToPreload = isIos && active && duration > 0 && !paused && !waiting && !err;
   useEffect(() => {
     if (!readyToPreload) return;
     let alive = true;
@@ -849,7 +858,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   }) : [];
 
   const pickEp = (ep: number) => {
-    setEpMap((m) => ({ ...m, [curId]: ep }));
+    playbackStarted.current = true;
+    if (ep === curEp) videoRef.current?.play();
+    else setEpMap((m) => ({ ...m, [curId]: ep }));
     setPanel(null);
   };
 
@@ -863,7 +874,18 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     onTime: onTimeTick,
     onDuration: onDurationTick,
     onSize: (w: number, h: number) => setVsize({ w, h }),
-    onPlaying: () => { setPaused(false); setWaiting(false); },
+    onPlaying: () => {
+      playbackStarted.current = true;
+      if (active && historyPlayback.current !== playKey) {
+        historyPlayback.current = playKey;
+        const progress = liveRef.current;
+        addHistory(curId, curEp, progress.key === playKey ? progress.t : undefined,
+          progress.key === playKey ? progress.dur : undefined);
+        lastSaveRef.current = Date.now();
+        progress.dirty = false;
+      }
+      setPaused(false); setWaiting(false);
+    },
     onPause: () => { setPaused(true); setWaiting(false); },
     onSeeked: () => setWaiting(false),
     onWaiting: () => setWaiting(true),
@@ -949,13 +971,16 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   {...playbackGestures}>
                   {isIos ? active && (
                     <IOSVideoSurface key={surfaceKey} ref={videoRef} source={nativeSource} viewport={false} {...playback}
-                      autoPlay={playbackIntent.current?.key === surfaceKey ? playbackIntent.current.playing : true}
-                      onPlaybackIntentChange={(playing) => { playbackIntent.current = { key: surfaceKey, playing }; }}
+                      autoPlay={playbackIntent.current?.key === surfaceKey ? playbackIntent.current.playing : playbackStarted.current}
+                      onPlaybackIntentChange={(playing) => {
+                        if (playing) playbackStarted.current = true;
+                        playbackIntent.current = { key: surfaceKey, playing };
+                      }}
                       enterDirection={episodeEntry?.key === playKey ? episodeEntry.direction : undefined}
                       onEnter={() => setEpisodeEntry(undefined)} />
                   ) : (
                     <VideoSurface key={surfaceKey} ref={videoRef} src={playUrl} poster={posterUrl}
-                      autoPlay={active}
+                      autoPlay={active && playbackStarted.current}
                       fit={isDesktop || wideVideo ? "contain" : "cover"}
                       onClick={() => { if (isDesktop) videoRef.current?.toggle(); }}
                       {...playback} />

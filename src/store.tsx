@@ -41,6 +41,8 @@ export type Page = PageInput & { key: string };
 export type ToastAction = { label: string; run: () => void; scope?: "history" };
 export type Toast = { id: number; msg: string; icon?: "ok" | "heart" | "star" | "info"; action?: ToastAction };
 
+export const HISTORY_LIMIT = 80;
+
 /** 观看记录：看到第几集、第几秒（`dur` 用来判断是否已看完） */
 export type WatchProgress = { id: number; ep: number; t: number; dur: number; at: number };
 
@@ -64,18 +66,29 @@ const DEFAULTS: Persist = {
 /** 旧版本 history 是 number[]，读出来时升级成带进度的结构 */
 function normalizeHistory(raw: unknown): WatchProgress[] {
   if (!Array.isArray(raw)) return [];
-  const out: WatchProgress[] = [];
-  raw.forEach((item, i) => {
-    if (typeof item === "number") {
-      out.push({ id: item, ep: 1, t: 0, dur: 0, at: Date.now() - i });
-      return;
-    }
-    const h = item as Partial<WatchProgress> | null;
-    if (h && typeof h.id === "number") {
-      out.push({ id: h.id, ep: Number(h.ep) || 1, t: Number(h.t) || 0, dur: Number(h.dur) || 0, at: Number(h.at) || Date.now() - i });
-    }
+  const newest = new Map<number, WatchProgress>();
+  const now = Date.now();
+  const nonnegative = (value: unknown) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : 0;
+  };
+  raw.forEach((item, index) => {
+    const value: Partial<WatchProgress> | null = typeof item === "number" ? { id: item } : item as Partial<WatchProgress> | null;
+    if (!value || !Number.isSafeInteger(value.id) || (value.id ?? 0) <= 0) return;
+    const id = value.id!;
+    const episode = Number(value.ep);
+    const timestamp = Number(value.at);
+    const entry: WatchProgress = {
+      id, ep: Number.isSafeInteger(episode) && episode > 0 ? episode : 1,
+      t: nonnegative(value.t), dur: nonnegative(value.dur),
+      at: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : now - index,
+    };
+    const previous = newest.get(id);
+    if (!previous || entry.at > previous.at) newest.set(id, entry);
   });
-  return out;
+  // Merge old duplicate IDs before applying the per-show limit, retaining the
+  // newest progress and the same most-recent-first order as add/restore.
+  return [...newest.values()].sort((a, b) => b.at - a.at).slice(0, HISTORY_LIMIT);
 }
 
 function loadPersist(): Persist {
@@ -290,7 +303,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         dur: dur ?? (epChanged ? 0 : prev?.dur ?? 0),
         at: Date.now(),
       };
-      return { ...s, history: [entry, ...s.history.filter((x) => x.id !== id)].slice(0, 80) };
+      return { ...s, history: [entry, ...s.history.filter((x) => x.id !== id)].slice(0, HISTORY_LIMIT) };
     });
   }, []);
   const clearHistory = useCallback(() => {
@@ -303,7 +316,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const restoreHistory = useCallback((entry: WatchProgress) => {
     setP((s) => {
       if (s.history.some((item) => item.id === entry.id)) return s;
-      const history = [...s.history, entry].sort((a, b) => b.at - a.at).slice(0, 80);
+      const history = [...s.history, entry].sort((a, b) => b.at - a.at).slice(0, HISTORY_LIMIT);
       return { ...s, history };
     });
   }, []);

@@ -30,6 +30,8 @@ pub(super) struct Entry {
     pub paused: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub resume_in_foreground: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub resume_in_background: bool,
     #[serde(skip)]
     pub capture: Option<Capture>,
     // Only cache-layer status text; transport URLs and raw errors are never stored here.
@@ -172,6 +174,8 @@ pub(super) struct Job {
     #[serde(skip)]
     pub worker_id: u64,
     #[serde(skip)]
+    pub media_kind: Option<super::transfer::MediaKind>,
+    #[serde(skip)]
     pub reused_bytes: u64,
     #[serde(skip)]
     pub network_bytes: u64,
@@ -243,6 +247,7 @@ impl Entry {
             episodes,
             paused: false,
             resume_in_foreground: false,
+            resume_in_background: false,
             capture,
             message: String::new(),
             previous: None,
@@ -252,6 +257,7 @@ impl Entry {
     pub fn resume(&mut self) {
         self.paused = false;
         self.resume_in_foreground = false;
+        self.resume_in_background = false;
         self.message.clear();
     }
 
@@ -378,9 +384,9 @@ pub(crate) struct BackgroundSnapshot {
 
 impl Queue {
     #[cfg(any(target_os = "ios", test))]
-    pub fn interrupt_background(&mut self, root: &Path) -> Result<(), String> {
+    pub fn interrupt_background(&mut self, root: &Path, recover: bool) -> Result<(), String> {
         self.pending.entries.retain(|entry| entry.capture.is_none());
-        self.pause_for_foreground(root)
+        self.pause_for_foreground(root, recover)
     }
 
     #[cfg(any(target_os = "ios", test))]
@@ -389,16 +395,17 @@ impl Queue {
         if self.pending.allow_background || self.pending.entries.iter().all(|entry| entry.paused) {
             return Ok(false);
         }
-        self.pause_for_foreground(root)?;
+        self.pause_for_foreground(root, false)?;
         Ok(true)
     }
 
     #[cfg(any(target_os = "ios", test))]
-    fn pause_for_foreground(&mut self, root: &Path) -> Result<(), String> {
+    fn pause_for_foreground(&mut self, root: &Path, recover: bool) -> Result<(), String> {
         for entry in &mut self.pending.entries {
             if !entry.paused {
                 entry.paused = true;
                 entry.resume_in_foreground = true;
+                entry.resume_in_background = recover;
                 entry.message = BACKGROUND_INTERRUPTED.into();
                 if entry.capture.is_some() {
                     if let Some(job) = self.active.get(&entry.id) {
@@ -406,6 +413,11 @@ impl Queue {
                         job.resume_capture_after_stop = !job.stopping;
                     }
                 }
+            }
+        }
+        if !recover {
+            for entry in &mut self.pending.entries {
+                entry.resume_in_background = false;
             }
         }
         for job in self.active.values() {
@@ -424,7 +436,7 @@ impl Queue {
     pub fn has_background_work(&self) -> bool {
         self.pending.allow_background
             && self.pending.entries.iter().any(|entry| {
-                entry.capture.is_none() && (!entry.paused || entry.resume_in_foreground)
+                entry.capture.is_none() && (!entry.paused || entry.resume_in_background)
             })
     }
 
@@ -440,8 +452,13 @@ impl Queue {
 
     #[cfg(any(target_os = "ios", test))]
     fn resume_interrupted(&mut self, root: &Path, background: bool) -> Result<bool, String> {
-        let should_resume =
-            |entry: &Entry| entry.resume_in_foreground && (!background || entry.capture.is_none());
+        let should_resume = |entry: &Entry| {
+            if background {
+                entry.resume_in_background && entry.capture.is_none()
+            } else {
+                entry.resume_in_foreground
+            }
+        };
         if !self.pending.entries.iter().any(should_resume) {
             return Ok(false);
         }
@@ -583,6 +600,7 @@ impl Queue {
                 if !stopped {
                     current.paused = true;
                     current.resume_in_foreground = can_retry;
+                    current.resume_in_background = can_retry;
                     current.message = job.message.clone();
                 }
                 current.previous = Some(job.clone());
@@ -687,7 +705,7 @@ mod tests {
         }
         let snapshot = queue.background_snapshot();
         assert_eq!((snapshot.remaining, snapshot.progress), (3, 375));
-        queue.interrupt_background(&root).unwrap();
+        queue.interrupt_background(&root, true).unwrap();
         assert!(job.lock().unwrap().stopping);
         assert!(queue.reserve().is_empty());
         queue.finish(
@@ -726,7 +744,7 @@ mod tests {
             })
             .unwrap();
         let (running, job) = queue.reserve().pop().unwrap();
-        queue.interrupt_background(&root).unwrap();
+        queue.interrupt_background(&root, true).unwrap();
         assert!(queue.resume_foreground(&root).unwrap());
         assert!(
             queue.reserve().is_empty(),
@@ -773,7 +791,7 @@ mod tests {
                 pending.add(manual)
             })
             .unwrap();
-        queue.interrupt_background(&root).unwrap();
+        queue.interrupt_background(&root, true).unwrap();
 
         let mut restarted = Queue {
             pending: Pending::read(&root),
@@ -791,6 +809,60 @@ mod tests {
         assert_eq!(reserved[0].0.episodes, Some(BTreeSet::from([2, 3])));
         assert!(Pending::read(&root).entries[1].paused);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn continued_task_cancellation_never_restarts_in_background_after_reload() {
+        let root = temp_root();
+        let mut queue = Queue::default();
+        queue
+            .change(&root, |pending| {
+                pending.add(entry(1, &[1, 2]))?;
+                let mut manual = entry(2, &[1]);
+                manual.paused = true;
+                pending.add(manual)
+            })
+            .unwrap();
+        let (running, job) = queue.reserve().pop().unwrap();
+        queue.interrupt_background(&root, true).unwrap();
+        // A later system cancellation must revoke a previously scheduled recovery.
+        queue.interrupt_background(&root, false).unwrap();
+        assert!(job.lock().unwrap().stopping);
+        queue.finish(
+            &root,
+            running,
+            job.lock().unwrap().clone(),
+            Err("已停止缓存".into()),
+        );
+        let mut restored = Queue {
+            pending: Pending::read(&root),
+            ..Queue::default()
+        };
+        assert!(!restored.has_background_work());
+        assert!(!restored.resume_background(&root).unwrap());
+        assert!(restored.reserve().is_empty());
+        assert!(restored.resume_foreground(&root).unwrap());
+        assert_eq!(restored.reserve()[0].0.id, 1);
+        assert!(restored.pending.entries[1].paused);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_foreground_resume_flag_does_not_grant_background_recovery() {
+        let entry: Entry = serde_json::from_value(serde_json::json!({
+            "id": 1, "title": "Legacy", "episodes": [1], "paused": true,
+            "resume_in_foreground": true
+        }))
+        .unwrap();
+        assert!(!entry.resume_in_background);
+        let queue = Queue {
+            pending: Pending {
+                entries: vec![entry],
+                ..Pending::default()
+            },
+            ..Queue::default()
+        };
+        assert!(!queue.has_background_work());
     }
 
     #[test]

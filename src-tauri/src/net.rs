@@ -689,15 +689,79 @@ async fn edge_request(
     }
 }
 
-/// 拉原始字节（图片 / m3u8 / 分片）。
+/// Raw passthrough also serves progressive MP4 on desktop. Keep its existing
+/// whole-body behavior separate from bounded image/HLS requests.
 pub async fn fetch_bytes(url: &str) -> Result<(Option<String>, Vec<u8>), String> {
-    let (kind, bytes, _, _) = fetch_media(url, &base()).await?;
+    let (kind, bytes, _, _) = fetch_media(url, &base(), None).await?;
     Ok((kind, bytes))
 }
 
-pub async fn fetch_media(
+pub async fn fetch_bytes_bounded(
+    url: &str,
+    limit: usize,
+) -> Result<(Option<String>, Vec<u8>), String> {
+    let (kind, bytes, _, _) = fetch_media_bounded(url, &base(), limit).await?;
+    Ok((kind, bytes))
+}
+
+// Bound concurrent allocations for images, playlists and watch resources. The
+// budget covers fetching/decoding HTTP bodies, not retained UI/cache responses.
+const MEDIA_REQUEST_LIMIT: usize = 4;
+static MEDIA_REQUESTS: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(MEDIA_REQUEST_LIMIT);
+
+pub async fn fetch_media_bounded(
     url: &str,
     origin: &str,
+    limit: usize,
+) -> Result<(Option<String>, Vec<u8>, url::Url, bool), String> {
+    let _permit = MEDIA_REQUESTS
+        .acquire()
+        .await
+        .map_err(|_| "媒体请求已停止")?;
+    fetch_media(url, origin, Some(limit)).await
+}
+
+#[derive(Debug, PartialEq)]
+enum MediaBodyError {
+    TooLarge,
+    Transport(String),
+}
+
+async fn read_media_body(
+    mut response: reqwest::Response,
+    limit: Option<usize>,
+) -> Result<Vec<u8>, MediaBodyError> {
+    if limit.is_some_and(|limit| {
+        response
+            .content_length()
+            .is_some_and(|len| len > limit as u64)
+    }) {
+        return Err(MediaBodyError::TooLarge);
+    }
+    let initial = response.content_length().unwrap_or(0).min(64 * 1024) as usize;
+    let mut bytes = Vec::with_capacity(initial);
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| MediaBodyError::Transport(err_text(&error)))?
+    {
+        if limit.is_some_and(|limit| chunk.len() > limit.saturating_sub(bytes.len())) {
+            return Err(MediaBodyError::TooLarge);
+        }
+        if limit.is_some() && bytes.capacity() - bytes.len() < chunk.len() {
+            // Avoid Vec's geometric growth reserving beyond the body budget.
+            bytes.reserve_exact(chunk.len());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+async fn fetch_media(
+    url: &str,
+    origin: &str,
+    limit: Option<usize>,
 ) -> Result<(Option<String>, Vec<u8>, url::Url, bool), String> {
     let url = url.to_string();
     let referer = format!("{origin}/");
@@ -717,16 +781,88 @@ pub async fn fetch_media(
             let complete = resp.status() == 200
                 && !resp.headers().contains_key(reqwest::header::CONTENT_RANGE);
             let final_url = resp.url().clone();
-            let bytes = resp.bytes().await.map_err(|e| err_text(&e))?.to_vec();
-            Ok((ctype, bytes, final_url, complete))
+            match read_media_body(resp, limit).await {
+                Ok(bytes) => Ok(Ok((ctype, bytes, final_url, complete))),
+                // An oversized entity will not shrink on a network retry.
+                Err(MediaBodyError::TooLarge) => Ok(Err("媒体响应超过大小限制".into())),
+                Err(MediaBodyError::Transport(error)) => Err(error),
+            }
         }
     })
-    .await
+    .await?
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn bounded_media_rejects_known_oversize_before_reading_and_accepts_exact_limit() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for (length, body) in [(6, &b""[..]), (5, &b"12345"[..])] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(socket.read_u8().await.unwrap());
+                }
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+                socket.write_all(body).await.unwrap();
+            });
+            let response = reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap()
+                .get(url)
+                .send()
+                .await
+                .unwrap();
+            let result = read_media_body(response, Some(5)).await;
+            if length > 5 {
+                // The declared body is absent: reading it would be a transport
+                // error, so TooLarge proves rejection before body reading.
+                assert_eq!(result.unwrap_err(), MediaBodyError::TooLarge);
+            } else {
+                assert_eq!(result.unwrap(), b"12345");
+            }
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn bounded_media_checks_chunked_bodies_without_content_length() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for (limit, expected) in [(6, Some(b"abcdef".to_vec())), (5, None)] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(socket.read_u8().await.unwrap());
+                }
+                socket.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n").await.unwrap();
+            });
+            // Direct local fixture client avoids changing the global URL guard.
+            let response = reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap()
+                .get(url)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.content_length(), None);
+            let result = read_media_body(response, Some(limit)).await;
+            match expected {
+                Some(bytes) => assert_eq!(result.unwrap(), bytes),
+                None => assert_eq!(result.unwrap_err(), MediaBodyError::TooLarge),
+            }
+            server.await.unwrap();
+        }
+    }
 
     #[tokio::test]
     async fn edge_read_retries_transient_failure_but_not_a_missing_route() {

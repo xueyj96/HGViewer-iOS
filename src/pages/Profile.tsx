@@ -8,7 +8,7 @@ import { api, APP_VERSION, fmtTime, isIos, isMobile, platformLabel } from "../ap
 import { useIOSCoverMenu } from "../components/IOSCoverMenu";
 import type { Detail } from "../types";
 import { useStore } from "../store";
-import { CompactAction, ConfirmAction, Empty, PageStatus } from "../components/ui";
+import { EmptyStatus, PageStatus } from "../components/ui";
 import { IClock, IDownload, ISettings, IStar } from "../icons";
 
 const libraryIcons = { fav: IStar, history: IClock, offline: IDownload };
@@ -16,23 +16,26 @@ const LIBRARY_PAGE_SIZE = 12;
 
 export default function Profile({ wide, active }: { wide: boolean; active: boolean }) {
   const symbol = useIOSSymbols();
-  const { history, favs, lineRevision, setFavLocal, syncFavorite, removeHistory, restoreHistory, clearHistory, push, toast } = useStore();
+  const { history, favs, lineRevision, setFavLocal, syncFavorite, removeHistory, restoreHistory, push, toast } = useStore();
   const [tab, setTab] = useState<"fav" | "history" | "offline">("fav");
-  const [detailCache, setDetailCache] = useState<{ line: number; items: Record<number, Detail> }>({ line: lineRevision, items: {} });
+  const [detailCache, setDetailCache] = useState<{ line: number; items: Record<number, Detail>; unavailable: number[] }>({ line: lineRevision, items: {}, unavailable: [] });
   const [limit, setLimit] = useState(LIBRARY_PAGE_SIZE);
   const [retry, setRetry] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const [confirmClear, setConfirmClear] = useState(false);
   const scroll = useRef<HTMLDivElement>(null);
+  const sentinel = useRef<HTMLDivElement>(null);
 
   const ids = tab === "fav" ? favs : tab === "history" ? history.map((h) => h.id) : [];
-  const visibleIds = ids.slice(0, limit);
+  const visibleIds = ids.slice(0, detailCache.line === lineRevision ? limit : LIBRARY_PAGE_SIZE);
   const visibleKey = visibleIds.join(",");
   const details = detailCache.line === lineRevision ? detailCache.items : {};
+  const unavailable = new Set(detailCache.line === lineRevision ? detailCache.unavailable : []);
+  const failed = visibleIds.some((id) => unavailable.has(id));
   const cards = visibleIds.flatMap((id) => details[id] ? [details[id]] : []);
   const detailsRef = useRef(details);
   detailsRef.current = details;
+  const unavailableRef = useRef(unavailable);
+  unavailableRef.current = unavailable;
   /** 观看记录里这条的进度（收藏页没有） */
   const progressOf = (id: number) => (tab === "history" ? history.find((h) => h.id === id) : undefined);
 
@@ -69,33 +72,73 @@ export default function Profile({ wide, active }: { wide: boolean; active: boole
     });
   };
 
+  const retryDetails = (id?: number) => {
+    setDetailCache((previous) => previous.line !== lineRevision ? previous : ({
+      ...previous,
+      unavailable: previous.unavailable.filter((failedId) => id === undefined ? !visibleIds.includes(failedId) : failedId !== id),
+    }));
+    setRetry((value) => value + 1);
+  };
+
+  useEffect(() => { setLimit(LIBRARY_PAGE_SIZE); }, [lineRevision]);
+
   useEffect(() => {
+    if (!active || tab === "offline") return;
     let alive = true;
-    const missing = visibleIds.filter((id) => !detailsRef.current[id]);
-    setFailed(false);
+    // A failed detail is settled for this line, not an unrequested entry.
+    // Only an explicit retry clears it; paging never repeats a permanent 404.
+    const missing = visibleIds.filter((id) => !detailsRef.current[id] && !unavailableRef.current.has(id));
     if (!missing.length) { setLoading(false); return; }
     setLoading(true);
     Promise.allSettled(missing.map((id) => api.video(id)))
-      .then((rs) => {
+      .then((results) => {
         if (!alive) return;
-        const loaded = rs.flatMap((result, i) => result.status === "fulfilled" && result.value?.id === missing[i]
+        const loaded = results.flatMap((result, i) => result.status === "fulfilled" && result.value?.id === missing[i]
           ? [[missing[i], result.value] as const] : []);
-        setDetailCache((previous) => ({
-          line: lineRevision,
-          items: { ...(previous.line === lineRevision ? previous.items : {}), ...Object.fromEntries(loaded) },
-        }));
-        setFailed(loaded.length < missing.length);
+        const loadedIds = new Set(loaded.map(([id]) => id));
+        setDetailCache((previous) => {
+          const sameLine = previous.line === lineRevision;
+          const failedIds = new Set(sameLine ? previous.unavailable : []);
+          for (const id of missing) {
+            if (loadedIds.has(id)) failedIds.delete(id);
+            else failedIds.add(id);
+          }
+          return {
+            line: lineRevision,
+            items: { ...(sameLine ? previous.items : {}), ...Object.fromEntries(loaded) },
+            unavailable: [...failedIds],
+          };
+        });
       })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lineRevision, visibleKey, retry]);
+  }, [active, tab, lineRevision, visibleKey, retry]);
 
-  useIOSCoverMenu(scroll, isIos && active && tab !== "offline" && !loading && cards.length > 0, tab === "history", ({ id, action }) => {
-    const show = cards.find((item) => item.id === id);
-    if (!show || !ids.includes(id)) return;
-    if (action === "remove") removeShow(id);
-    else if (action === "restart" && tab === "history") playShow(show, true);
+  const hasMore = visibleIds.length < ids.length;
+  useEffect(() => {
+    const target = sentinel.current;
+    const root = scroll.current;
+    // Wait for this batch to settle, including failures, before advancing.
+    // One unavailable work must not make the older history unreachable.
+    if (!active || !root || !target || !hasMore || loading ||
+      visibleIds.some((id) => !details[id] && !unavailable.has(id))) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      setLimit((value) => Math.min(value + LIBRARY_PAGE_SIZE, ids.length));
+    }, { root, rootMargin: "0px 0px 200px 0px" });
+    observer.observe(target);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, tab, visibleKey, ids.length, hasMore, loading, detailCache]);
+
+  useIOSCoverMenu(scroll, isIos && active && tab !== "offline" && (cards.length > 0 || failed), tab === "history", ({ id, action }) => {
+    if (!ids.includes(id)) return;
+    if (action === "remove") { removeShow(id); return; }
+    const show = details[id];
+    if (!show) return;
+    if (action === "restart" && tab === "history") playShow(show, true);
     else if (action === "cache" && show.episodes?.length) {
       push({ kind: "offline", id, title: show.title, episodes: show.episodes.map((ep) => ep.ep_num) });
     }
@@ -146,40 +189,28 @@ export default function Profile({ wide, active }: { wide: boolean; active: boole
         {!isIos && segments}
 
         {tab === "offline" ? <OfflineLibrary active={active} wide={wide} scroll={scroll} /> : <div className={isIos ? "space-y-2" : "mt-3 space-y-2"}>
-          {cards.length > 0 && (
+          {(cards.length > 0 || failed) && (
             <ShowCoverGrid compact={isIos && !wide}>
-              {cards.map((c) => {
-                const p = progressOf(c.id);
-                const badge = p ? `第 ${p.ep} 集${p.t > 3 ? ` · ${fmtTime(p.t)}` : ""}` : undefined;
-                return <ShowCoverCard key={c.id} title={c.title} cover={c.cover} badge={badge}
-                  menu={isIos ? { id: c.id, canCache: !!c.episodes?.length } : undefined} onClick={() => playShow(c)} />;
+              {visibleIds.map((id) => {
+                const show = details[id];
+                const missing = unavailable.has(id);
+                if (!show && !missing) return null;
+                const progress = progressOf(id);
+                const badge = progress ? `第 ${progress.ep} 集${progress.t > 3 ? ` · ${fmtTime(progress.t)}` : ""}` : undefined;
+                return <ShowCoverCard key={id} title={show?.title || "作品暂不可用"} cover={show?.cover} badge={badge}
+                  unavailable={missing} menu={isIos ? { id, canCache: !missing && !!show?.episodes?.length } : undefined}
+                  onClick={() => show ? playShow(show) : retryDetails(id)} />;
               })}
             </ShowCoverGrid>
           )}
           {loading && <div className="flex justify-center py-4" role="status" aria-label="正在加载资料库"><div className="w-7 h-7 spinner" /></div>}
-          {!loading && failed && <PageStatus title={cards.length ? "部分作品加载失败" : "作品加载失败"} onRetry={() => setRetry((n) => n + 1)} />}
-          {!loading && ids.length === 0 && (
-            <Empty icon={tab === "fav" ? <IStar size={24} /> : <IClock size={24} />}
-              title={tab === "fav" ? "还没有收藏" : "还没有观看记录"}
-              sub={tab === "fav" ? "在剧集页点收藏，之后就能在这里找到" : "看过的剧集会出现在这里"}
-              action="去逛逛" onAction={() => push({ kind: "ranks" })} />
-          )}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            {!loading && visibleIds.length < ids.length && (
-              <CompactAction tone="neutral" onClick={() => setLimit((n) => n + LIBRARY_PAGE_SIZE)}>加载更多</CompactAction>
-            )}
-            {ids.length > 0 && tab === "history" && (
-              <button type="button" onClick={() => setConfirmClear(true)}
-                className="ml-auto min-h-11 rounded-(--r-ctl) bg-danger/10 px-3 text-xs font-semibold text-danger pressable">清空观看历史</button>
-            )}
-          </div>
+          {!loading && failed && <PageStatus title={cards.length ? "部分作品加载失败" : "作品加载失败"} onRetry={() => retryDetails()} />}
+          {!loading && ids.length === 0 && <EmptyStatus>{tab === "fav" ? "还没有收藏" : "还没有观看记录"}</EmptyStatus>}
+          {hasMore && <div ref={sentinel} aria-hidden="true" className="h-px" />}
         </div>}
 
         {!isIos && <div className="text-center text-[10px] text-dim mt-5">HGhub {APP_VERSION} · {platformLabel} 客户端</div>}
       </div>
-      <ConfirmAction open={confirmClear} title="清空观看历史"
-        message="清空全部观看记录和续播进度？" confirm="清空历史" onCancel={() => setConfirmClear(false)}
-        onConfirm={() => { clearHistory(); setConfirmClear(false); }} />
     </div>
   );
 }

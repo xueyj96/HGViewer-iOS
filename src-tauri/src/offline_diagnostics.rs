@@ -51,6 +51,7 @@ pub(super) fn worker(
             "worker": job.worker_id,
             "source": if job.watch_key.is_some() { "recent_playback" } else { "offline_queue" },
             "episode": job.ep,
+            "media_kind": job.media_kind,
             "completed": job.done,
             "total": job.total,
             "resource_retries": job.resource_retries,

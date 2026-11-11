@@ -7,20 +7,20 @@ export function ShowCoverGrid({ compact, children }: { compact: boolean; childre
   return <div className={`grid gap-2 ${compact ? "grid-cols-2" : "grid-cols-3"}`}>{children}</div>;
 }
 
-export function ShowCoverCard({ title, cover, local = false, badge, menu, progress, onClick }: {
-  title: string; cover?: string; local?: boolean; badge?: string;
+export function ShowCoverCard({ title, cover, local = false, badge, menu, progress, unavailable = false, onClick }: {
+  title: string; cover?: string; local?: boolean; badge?: string; unavailable?: boolean;
   menu?: { id: number; canCache?: boolean; download?: DownloadAction; downloadBlocked?: boolean };
   progress?: { fraction?: number; label: string; paused: boolean; speed?: string; networkSpeed?: string };
   onClick: () => void;
 }) {
-  const placeholder = <span className="absolute inset-0 grid place-items-center bg-s2 text-dim" aria-hidden="true"><IPlayF size={23} /></span>;
+  const placeholder = <span className="absolute inset-0 grid place-items-center bg-s2 text-dim" aria-hidden="true">{unavailable ? <span className="text-xs">点按重试</span> : <IPlayF size={23} />}</span>;
   const percent = progress?.fraction === undefined ? undefined : Math.floor(progress.fraction * 100 + 1e-8);
   const progressLabel = progress && [progress.label, percent !== undefined && `${percent}%`].filter(Boolean).join(" · ");
   return (
     <div className="relative min-w-0">
       <button type="button" onClick={onClick} data-hg-menu-card={menu?.id} data-hg-can-cache={menu?.canCache}
-        data-hg-download-action={menu?.download} data-hg-download-blocked={menu?.downloadBlocked}
-        aria-description={[progressLabel, progress?.speed, progress?.networkSpeed, menu && "长按打开剧集操作"].filter(Boolean).join(" ") || undefined}
+        data-hg-unavailable={unavailable || undefined} data-hg-download-action={menu?.download} data-hg-download-blocked={menu?.downloadBlocked}
+        aria-description={[unavailable && "作品暂不可用，点按重试", progressLabel, progress?.speed, progress?.networkSpeed, menu && "长按打开剧集操作"].filter(Boolean).join(" ") || undefined}
         className={`relative block w-full aspect-[3/4] overflow-hidden rounded-(--r-sm) bg-s1 text-left elev-1 pressable ${menu ? "select-none [-webkit-touch-callout:none] [&_img]:pointer-events-none" : ""}`}>
         {cover ? <Img key={cover} src={cover} raw={local} fallback={placeholder} /> : placeholder}
         {percent !== undefined && percent > 0 && <span aria-hidden="true"

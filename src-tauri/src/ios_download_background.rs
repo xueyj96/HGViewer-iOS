@@ -65,9 +65,9 @@ extern "C" fn hg_download_snapshot(out: *mut BackgroundSnapshot) {
 }
 
 #[no_mangle]
-extern "C" fn hg_download_expired() {
+extern "C" fn hg_download_expired(recover: std::ffi::c_int) {
     if let Some(app) = APP.get() {
-        crate::offline::pause_background(&app.state::<crate::offline::Cache>());
+        crate::offline::pause_background(&app.state::<crate::offline::Cache>(), recover != 0);
     }
 }
 
@@ -105,6 +105,7 @@ extern "C" fn hg_download_log(event: std::ffi::c_int, code: i64) {
         9 => ("background_recovery_submission_failed", Some(code)),
         10 => ("background_recovery_expired", None),
         11 => ("background_recovery_finished", None),
+        12 => ("background_paused", None),
         _ => return,
     };
     if let Some(app) = APP.get() {

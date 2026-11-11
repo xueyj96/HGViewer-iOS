@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, type RecentPlayback } from "../api";
 import { CacheDeleteDialog, CachePageFrame, cacheSize } from "../components/CachePageFrame";
-import { CompactAction, PageStatus } from "../components/ui";
+import { CompactAction, EmptyStatus, PageStatus } from "../components/ui";
 import { useOfflineStatus } from "../components/useOfflineStatus";
 import { IDownload, ITrash } from "../icons";
 
@@ -42,7 +42,7 @@ export default function RecentCache({ onBack, active }: { onBack: () => void; ac
         recent.some((item) => item.key === last.watch_key) &&
         <p role="status" className="text-xs text-mut">{last.message}</p>}
       {!state && !readError && <p role="status" className="text-sm text-mut">正在读取缓存…</p>}
-      {state && !groups.size && !readError && <PageStatus title="暂无最近播放缓存。" />}
+      {state && !groups.size && !readError && <EmptyStatus>暂无最近播放缓存</EmptyStatus>}
       {[...groups].map(([id, items]) => (
         <section key={id} className="hg-ios-grouped-list rounded-(--r-md) bg-s2 px-3">
           <h2 className="border-b border-s3 py-3 text-sm font-semibold text-on [overflow-wrap:anywhere]">{items[0].title || "未命名剧集"}</h2>

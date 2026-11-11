@@ -753,6 +753,29 @@ html.theme-light .plat-ios {
   border-radius: var(--r-lg);
 }
 
+/* Confirmation actions have separate roles, rather than equal content columns.
+   Keep the app's control geometry; the wider gap separates opposing actions. */
+.plat-ios .hg-confirm-content {
+  /* 16 + 20 + 8 + 60 + 16 + 44 + 16 = 180: content budget. */
+  height: 180px;
+  grid-template-rows: 20px calc(2 * var(--ios-control-gap)) 60px calc(4 * var(--ios-control-gap)) var(--ios-control-target);
+  gap: 0;
+  padding: calc(4 * var(--ios-control-gap));
+}
+.plat-ios .hg-confirm-actions {
+  column-gap: calc(4 * var(--ios-control-gap));
+  row-gap: var(--ios-control-gap);
+}
+.plat-ios .hg-confirm-button {
+  height: var(--ios-control-target);
+  width: calc(2 * var(--ios-control-target));
+  padding-block: var(--ios-compact-inset);
+}
+.plat-ios .hg-confirm-button-face {
+  height: var(--ios-control-face);
+  border-radius: var(--ios-control-radius);
+}
+
 .plat-ios .hg-ios-sheet-title {
   font-size: 19px;
 }

@@ -20,6 +20,10 @@ export function CompactAction({ children, onClick, disabled, tone = "accent", cl
   </button>;
 }
 
+export function EmptyStatus({ children }: { children: React.ReactNode }) {
+  return <p role="status" className="py-8 text-center text-sm text-mut">{children}</p>;
+}
+
 export function PageStatus({ title, detail, onRetry }: { title: string; detail?: string; onRetry?: () => void }) {
   return <div className="hg-ios-content-card flex items-center justify-between gap-2 rounded-(--r-md) bg-s2 px-3 py-2 text-sm text-on" role="status">
     <div className="min-w-0">
@@ -44,23 +48,32 @@ export function PlaybackError({ message, title = "视频暂时无法加载", onR
   </div>;
 }
 
+// Fixed confirmation templates require concise authored copy. Keep the full
+// text in accessible names/descriptions if unexpected input needs truncation.
+export const CONFIRM_TEXT_LIMITS = { title: 16, message: 60, button: 4 } as const;
+function confirmationText(text: string, limit: number) {
+  const characters = Array.from(text.trim());
+  return characters.length <= limit ? text.trim() : `${characters.slice(0, limit - 1).join("")}…`;
+}
+
 export function ConfirmAction({ open, title, message, confirm, cancel = "取消", danger = true, busy, disabled, error, onCancel, onConfirm }: {
   open: boolean; title: string; message: string; confirm: string; cancel?: string; danger?: boolean;
   busy?: boolean; disabled?: boolean; error?: string; onCancel: () => void; onConfirm: () => void;
 }) {
   const messageId = useId();
   const dismiss = () => { if (!busy) onCancel(); };
-  return <Modal open={open} onClose={dismiss} width={310} label={title} role="alertdialog" describedBy={messageId}>
-    <div className="px-4 pt-5 pb-4 text-center">
-      <p id={messageId} className="text-sm font-semibold text-on">{message}</p>
-      {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <button type="button" disabled={busy}
-          className="min-h-11 rounded-(--r-ctl) bg-s3 px-2 text-sm font-semibold text-on pressable disabled:opacity-50"
-          onClick={dismiss}>{cancel}</button>
-        <button type="button" disabled={disabled || busy}
-          className={`min-h-11 rounded-(--r-ctl) px-2 text-sm font-semibold pressable disabled:opacity-50 ${danger ? "bg-danger/10 text-danger" : "bg-primary text-on-primary"}`}
-          onClick={onConfirm}>{confirm}</button>
+  return <Modal open={open} onClose={dismiss} width={320} height={180} label={title} role="alertdialog" describedBy={messageId}>
+    <div className="hg-confirm-content grid h-[180px] grid-rows-[20px_8px_60px_16px_44px] p-4">
+      <h2 className="truncate text-center text-sm font-semibold leading-5 text-on">{confirmationText(title, CONFIRM_TEXT_LIMITS.title)}</h2>
+      <p id={messageId} role={error ? "alert" : undefined} aria-label={error || message}
+        className="row-start-3 line-clamp-3 text-left text-[13px] leading-5 text-on">{confirmationText(error || message, CONFIRM_TEXT_LIMITS.message)}</p>
+      <div className="hg-confirm-actions row-start-5 flex flex-wrap items-center justify-between gap-4">
+        <button type="button" disabled={busy} aria-label={cancel}
+          className="hg-confirm-button inline-flex h-11 w-22 shrink-0 items-center py-1 text-[13px] font-semibold leading-5 pressable disabled:opacity-50"
+          onClick={dismiss}><span className="hg-confirm-button-face flex h-9 whitespace-nowrap w-full items-center justify-center rounded-(--r-ctl) bg-s3 px-2 text-on">{confirmationText(cancel, CONFIRM_TEXT_LIMITS.button)}</span></button>
+        <button type="button" disabled={disabled || busy} aria-label={confirm}
+          className="hg-confirm-button ml-auto inline-flex h-11 w-22 shrink-0 items-center py-1 text-[13px] font-semibold leading-5 pressable disabled:opacity-50"
+          onClick={onConfirm}><span className={`hg-confirm-button-face flex h-9 whitespace-nowrap w-full items-center justify-center rounded-(--r-ctl) px-2 ${danger ? "bg-danger/10 text-danger" : "bg-primary text-on-primary"}`}>{confirmationText(confirm, CONFIRM_TEXT_LIMITS.button)}</span></button>
       </div>
     </div>
   </Modal>;
@@ -174,8 +187,8 @@ export function Sheet({ open, onClose, children, z = "z-40", fullPage, label = f
 }
 
 /* ——— 居中弹窗 ——— */
-export function Modal({ open, onClose, children, width = 340, label, role = "dialog", describedBy }: {
-  open: boolean; onClose: () => void; children: React.ReactNode; width?: number; label?: string;
+export function Modal({ open, onClose, children, width = 340, height, label, role = "dialog", describedBy }: {
+  open: boolean; onClose: () => void; children: React.ReactNode; width?: number; height?: number; label?: string;
   role?: "dialog" | "alertdialog"; describedBy?: string;
 }) {
   const [render, setRender] = useState(open);
@@ -197,7 +210,8 @@ export function Modal({ open, onClose, children, width = 340, label, role = "dia
             onClose();
           } else keepDialogTab(event);
         }}
-        className={`hg-ios-alert relative bg-s3 rounded-(--r-lg) elev-3 ${open ? "a-scale-in" : "opacity-0 scale-90 transition-all"}`} style={{ width, maxWidth: "100%" }}>
+        className={`hg-ios-alert relative bg-s3 rounded-(--r-lg) elev-3 ${open ? "a-scale-in" : "opacity-0 scale-90 transition-all"}`} style={height === undefined ? { width, maxWidth: "100%" }
+          : { width, minWidth: width, maxWidth: width, height, minHeight: height, maxHeight: height }}>
         {children}
       </div>
     </div>

@@ -36,6 +36,8 @@ pub struct Cover {
     width: f64,
     height: f64,
     can_cache: bool,
+    #[serde(default)]
+    unavailable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     preview: Option<Preview>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -59,10 +61,9 @@ pub fn ios_cover_menu_update(
     history: bool,
     covers: Vec<Cover>,
 ) -> Result<(), String> {
-    let limit = if covers
-        .iter()
-        .all(|cover| cover.ep.is_some() || cover.download_action.is_some() || cover.browse_kind.is_some())
-    {
+    let limit = if covers.iter().all(|cover| {
+        cover.ep.is_some() || cover.download_action.is_some() || cover.browse_kind.is_some()
+    }) {
         128
     } else {
         12
@@ -77,9 +78,15 @@ pub fn ios_cover_menu_update(
                 || cover.width <= 0.0
                 || cover.height <= 0.0
                 || cover.preview.as_ref().is_some_and(|preview| {
-                    ![preview.x, preview.y, preview.width, preview.height, preview.radius]
-                        .iter()
-                        .all(|value| value.is_finite() && value.abs() <= 10_000.0)
+                    ![
+                        preview.x,
+                        preview.y,
+                        preview.width,
+                        preview.height,
+                        preview.radius,
+                    ]
+                    .iter()
+                    .all(|value| value.is_finite() && value.abs() <= 10_000.0)
                         || preview.width <= 0.0
                         || preview.height <= 0.0
                         || preview.radius < 0.0

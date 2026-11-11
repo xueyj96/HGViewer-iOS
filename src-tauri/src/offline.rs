@@ -131,6 +131,7 @@ impl Cache {
             return;
         }
         let _ = std::fs::remove_dir_all(root.join(".partial"));
+        cleanup_detached(&root, root.join(".trash"));
         let pending = Pending::read(&root);
         prune_staging(&root, &pending);
         self.queue.lock().unwrap().pending = pending;
@@ -323,9 +324,13 @@ pub fn enter_background(cache: &Cache) {
 }
 
 #[cfg(target_os = "ios")]
-pub fn pause_background(cache: &Cache) {
+pub fn pause_background(cache: &Cache, recover: bool) {
     if let Ok(root) = cache.root() {
-        let result = cache.queue.lock().unwrap().interrupt_background(&root);
+        let result = cache
+            .queue
+            .lock()
+            .unwrap()
+            .interrupt_background(&root, recover);
         if result.is_err() {
             diagnostics::record(
                 &root,
@@ -427,6 +432,7 @@ pub fn offline_pause(cache: tauri::State<'_, Cache>, id: i64) -> Result<(), Stri
             .ok_or("这部剧没有待下载任务")?;
         entry.paused = true;
         entry.resume_in_foreground = false;
+        entry.resume_in_background = false;
         entry.message.clear();
         Ok(())
     })?;
@@ -466,10 +472,13 @@ pub fn offline_cancel(cache: tauri::State<'_, Cache>, id: i64) -> Result<(), Str
             job.stopping = true;
         }
     }
-    if !queue.active.contains_key(&id) && !queue.pending.entries.iter().any(|entry| entry.id == id)
+    let detached = if !queue.active.contains_key(&id)
+        && !queue.pending.entries.iter().any(|entry| entry.id == id)
     {
-        discard_staging(&root, id);
-    }
+        discard_staging(&root, id)
+    } else {
+        None
+    };
     if canceled {
         queue.interrupted += 1;
     }
@@ -478,6 +487,9 @@ pub fn offline_cancel(cache: tauri::State<'_, Cache>, id: i64) -> Result<(), Str
         .get(&id)
         .map(|job| job.lock().unwrap().worker_id);
     drop(queue);
+    if let Some(detached) = detached {
+        cleanup_detached(&root, detached);
+    }
     diagnostics::record(
         &root,
         "user_canceled",
@@ -492,37 +504,80 @@ pub fn offline_delete(
     id: i64,
     ep: Option<u32>,
 ) -> Result<(), String> {
+    delete_cached(&cache, id, ep)
+}
+
+fn delete_cached(cache: &Cache, id: i64, ep: Option<u32>) -> Result<(), String> {
     let root = cache.root()?;
-    let mut queue = cache.queue.lock().unwrap();
-    if queue.active.contains_key(&id)
-        || queue
-            .pending
-            .entries
-            .iter()
-            .any(|entry| entry.id == id && !entry.paused)
-    {
-        return Err("请先暂停这部剧的下载".into());
-    }
-    for item in list(&root)?
-        .into_iter()
-        .filter(|item| item.id == id && ep.is_none_or(|ep| item.ep == ep))
-    {
-        std::fs::remove_dir_all(path(&root, item.id, item.ep)).map_err(|_| "删除缓存失败")?;
-    }
-    if ep.is_none() || !list(&root)?.iter().any(|item| item.id == id) {
-        let dir = show_dir(&root, id);
-        if dir.exists() {
-            std::fs::remove_dir_all(dir).map_err(|_| "删除剧集封面和信息失败")?;
+    let mut detached = Vec::new();
+    // Only rename while holding the queue lock. Recursive deletion happens after
+    // release, and therefore cannot erase a new worker's directory for this id.
+    let result: Result<(), String> = (|| {
+        let mut queue = cache.queue.lock().unwrap();
+        if queue.active.contains_key(&id)
+            || queue
+                .pending
+                .entries
+                .iter()
+                .any(|entry| entry.id == id && !entry.paused)
+        {
+            return Err("请先暂停这部剧的下载".into());
         }
+        let episodes = cached_episode_paths(&root, id)?;
+        for (number, directory) in &episodes {
+            if ep.is_none_or(|ep| *number == ep) {
+                if let Some(directory) =
+                    detach_for_cleanup(&root, directory).map_err(|_| "删除缓存失败")?
+                {
+                    detached.push(directory);
+                }
+            }
+        }
+        let remaining = ep.is_some_and(|ep| episodes.iter().any(|(number, _)| *number != ep));
+        if !remaining {
+            if let Some(directory) = detach_for_cleanup(&root, &show_dir(&root, id))
+                .map_err(|_| "删除剧集封面和信息失败")?
+            {
+                detached.push(directory);
+            }
+        }
+        if ep.is_none() {
+            queue.change(&root, |pending| {
+                pending.entries.retain(|entry| entry.id != id);
+                Ok(())
+            })?;
+            if let Some(directory) =
+                detach_for_cleanup(&root, &stage_path(&root, id)).map_err(|_| "清理下载暂存失败")?
+            {
+                detached.push(directory);
+            }
+        }
+        Ok(())
+    })();
+    let mut cleanup_failed = false;
+    for directory in detached {
+        cleanup_failed |= !cleanup_detached(&root, directory);
     }
-    if ep.is_none() {
-        queue.change(&root, |pending| {
-            pending.entries.retain(|entry| entry.id != id);
-            Ok(())
-        })?;
-        discard_staging(&root, id);
+    result?;
+    if cleanup_failed {
+        return Err("缓存已移除，部分文件将在下次启动时继续清理".into());
     }
     Ok(())
+}
+
+// Directory names identify committed episode packages; do not read every
+// episode's metadata while blocking pause/cancel requests for unrelated shows.
+fn cached_episode_paths(root: &Path, id: i64) -> Result<Vec<(u32, PathBuf)>, String> {
+    let prefix = format!("{id}-");
+    Ok(std::fs::read_dir(root)
+        .map_err(|_| "无法读取缓存目录")?
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let number = name.to_str()?.strip_prefix(&prefix)?.parse::<u32>().ok()?;
+            Some((number, entry.path()))
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -768,7 +823,7 @@ pub fn fill_slots(app: &tauri::AppHandle) {
             } else {
                 attempt().await
             };
-            let (event, outcome, failure) = {
+            let (event, outcome, failure, detached) = {
                 let mut queue = cache.queue.lock().unwrap();
                 let mut outcome = job.lock().unwrap().clone();
                 if let Some(key) = outcome.watch_key {
@@ -795,11 +850,19 @@ pub fn fill_slots(app: &tauri::AppHandle) {
                     .map(diagnostics::Failure::from);
                 let id = entry.id;
                 queue.finish(&root, entry, outcome.clone(), result);
-                if !queue.pending.entries.iter().any(|entry| entry.id == id) {
-                    discard_staging(&root, id);
-                }
-                (event, outcome, failure)
+                let detached = if !queue.pending.entries.iter().any(|entry| entry.id == id) {
+                    discard_staging(&root, id)
+                } else {
+                    None
+                };
+                (event, outcome, failure, detached)
             };
+            if let Some(detached) = detached {
+                let cleanup_root = root.clone();
+                let _ =
+                    tokio::task::spawn_blocking(move || cleanup_detached(&cleanup_root, detached))
+                        .await;
+            }
             diagnostics::worker(
                 &root,
                 event,
@@ -842,7 +905,11 @@ where
     Fut: std::future::Future<Output = Result<(), TransferFailure>>,
 {
     match attempt().await {
-        Err(error) if error.retry_after.is_some() => {
+        Err(error)
+            if error.retry_after.is_some()
+                || matches!(error.stage, "media" | "mp4" | "hls_playlist" | "hls_asset")
+                    && matches!(error.reason, FailureReason::Http(401 | 403)) =>
+        {
             on_retry(&error);
             {
                 let mut job = job.lock().unwrap();
@@ -922,7 +989,7 @@ async fn download_entry(
         .await?;
         if !source.episodes.is_empty() {
             let cover = source.cover.as_deref().and_then(media::cached_cover);
-            let _queue = cache.queue.lock().unwrap();
+            // This active worker owns the show's files until Queue::finish.
             let _ = save_show(
                 root,
                 source.id,
@@ -952,14 +1019,56 @@ fn staged_episode(stage: &Path) -> Option<u32> {
         .ok()
 }
 
-fn discard_staging(root: &Path, id: i64) {
-    if let Err(error) = std::fs::remove_dir_all(stage_path(root, id)) {
-        if error.kind() != std::io::ErrorKind::NotFound {
+// Callers must establish that no active worker owns this path. Renaming to a
+// unique tombstone transfers cleanup ownership away from a reusable cache path.
+fn detach_for_cleanup(root: &Path, directory: &Path) -> std::io::Result<Option<PathBuf>> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let trash = root.join(".trash");
+    std::fs::create_dir_all(&trash)?;
+    loop {
+        let target = trash.join(format!(
+            "{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        if target.exists() {
+            continue;
+        }
+        return match std::fs::rename(directory, &target) {
+            Ok(()) => Ok(Some(target)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        };
+    }
+}
+
+fn cleanup_detached(root: &Path, directory: PathBuf) -> bool {
+    match std::fs::remove_dir_all(directory) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(_) => {
+            // The .trash path remains owned and is retried on the next bind.
             diagnostics::record(
                 root,
                 "staging_cleanup_failed",
-                serde_json::json!({"operation": "discard"}),
+                serde_json::json!({"operation": "detached"}),
             );
+            false
+        }
+    }
+}
+
+fn discard_staging(root: &Path, id: i64) -> Option<PathBuf> {
+    match detach_for_cleanup(root, &stage_path(root, id)) {
+        Ok(detached) => detached,
+        Err(_) => {
+            diagnostics::record(
+                root,
+                "staging_cleanup_failed",
+                serde_json::json!({"operation": "detach"}),
+            );
+            None
         }
     }
 }
@@ -1156,7 +1265,7 @@ async fn run(
             } else {
                 load_show_cover(&detail).await
             };
-            let _queue = cache.queue.lock().unwrap();
+            // The active worker prevents deletion; no queue lock is needed for disk I/O.
             // A cover failure should not invalidate a playable episode.
             let _ = save_show(
                 root,
@@ -1180,6 +1289,8 @@ fn storage_error(error: std::io::Error) -> String {
         "无法写入本地缓存".into()
     }
 }
+
+const MP4_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
 
 pub async fn serve(cache: &Cache, path_value: &str, range: Option<&str>) -> Response<Vec<u8>> {
     let error = |status| Response::builder().status(status).body(Vec::new()).unwrap();
@@ -1237,8 +1348,8 @@ pub async fn serve(cache: &Cache, path_value: &str, range: Option<&str>) -> Resp
                 .body(Vec::new())
                 .unwrap();
         };
-        let end = if *name == "video.mp4" && range.ends_with('-') {
-            end.min(start.saturating_add(8 * 1024 * 1024 - 1))
+        let end = if *name == "video.mp4" {
+            end.min(start.saturating_add(MP4_RESPONSE_BYTES - 1))
         } else {
             end
         };
@@ -1246,6 +1357,14 @@ pub async fn serve(cache: &Cache, path_value: &str, range: Option<&str>) -> Resp
             .status(206)
             .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{len}"));
         (start, end)
+    } else if *name == "video.mp4" && len > MP4_RESPONSE_BYTES {
+        // A 206 without a Range request can look like a truncated complete
+        // file to clients. Require range-based playback instead of allocating
+        // the whole MP4 or claiming a partial response satisfies a full GET.
+        return builder
+            .status(400)
+            .body(b"Range required for large video".to_vec())
+            .unwrap();
     } else {
         (0, len - 1)
     };
@@ -1305,6 +1424,36 @@ mod tests {
         .await;
         assert_eq!(result.unwrap_err().message, "网络仍未恢复");
         assert_eq!(attempts.load(std::sync::atomic::Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
+    async fn expired_media_address_refreshes_once_but_api_denial_does_not() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for (stage, succeeds, expected) in [
+            ("hls_asset", true, 2),
+            ("hls_asset", false, 2),
+            ("episode_source", false, 1),
+            ("episode_list", false, 1),
+        ] {
+            let attempts = AtomicUsize::new(0);
+            let result = retry_download(
+                &Mutex::new(Job::default()),
+                || async {
+                    let n = attempts.fetch_add(1, Ordering::SeqCst);
+                    if succeeds && n > 0 {
+                        Ok(())
+                    } else {
+                        Err(TransferFailure::from("HTTP 403")
+                            .with_reason(FailureReason::Http(403))
+                            .at(stage))
+                    }
+                },
+                |_| {},
+            )
+            .await;
+            assert_eq!(attempts.load(Ordering::SeqCst), expected);
+            assert_eq!(result.is_ok(), succeeds);
+        }
     }
 
     #[tokio::test]
@@ -1543,7 +1692,13 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
-        for scenario in ["same", "revision", "signed", "parallel-failure"] {
+        for scenario in [
+            "same",
+            "revision",
+            "signed",
+            "parallel-failure",
+            "slow-sibling",
+        ] {
             let root = std::env::temp_dir()
                 .join(format!("hg-hls-resume-{}-{scenario}", std::process::id()));
             let cache = Cache::default();
@@ -1600,7 +1755,13 @@ mod tests {
                                     };
                                     ("200 OK", format!("#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\na.ts\n#EXTINF:1,\nb.ts{query}\n#EXTINF:1,\nc.ts\n#EXT-X-ENDLIST\n").into_bytes())
                                 }
-                                "/a.ts" if attempt == 0 && scenario == "parallel-failure" => {
+                                "/a.ts"
+                                    if attempt == 0
+                                        && matches!(
+                                            scenario,
+                                            "parallel-failure" | "slow-sibling"
+                                        ) =>
+                                {
                                     ("404 Not Found", Vec::new())
                                 }
                                 "/a.ts" if attempt == 0 => {
@@ -1618,8 +1779,13 @@ mod tests {
                                 }
                                 "/a.ts" => ("200 OK", vec![0x47; 188]),
                                 "/b.ts" => {
-                                    if attempt == 0 && scenario == "parallel-failure" {
-                                        tokio::time::sleep(Duration::from_millis(200)).await;
+                                    if attempt == 0 {
+                                        let delay = match scenario {
+                                            "parallel-failure" => 200,
+                                            "slow-sibling" => 4000,
+                                            _ => 0,
+                                        };
+                                        tokio::time::sleep(Duration::from_millis(delay)).await;
                                     }
                                     ("200 OK", vec![0x47; 376])
                                 }
@@ -1710,7 +1876,7 @@ mod tests {
                 resumed.lock().unwrap().reused_bytes,
                 match scenario {
                     "revision" => 188,
-                    "parallel-failure" => 376,
+                    "parallel-failure" | "slow-sibling" => 376,
                     _ => 564,
                 }
             );
@@ -1725,7 +1891,7 @@ mod tests {
             second_attempt.sort();
             if scenario == "revision" {
                 assert_eq!(second_attempt, ["/a.ts", "/b.ts?revision=2", "/index.m3u8"]);
-            } else if scenario == "parallel-failure" {
+            } else if matches!(scenario, "parallel-failure" | "slow-sibling") {
                 assert_eq!(second_attempt, ["/a.ts", "/c.ts", "/index.m3u8"]);
             } else {
                 assert_eq!(second_attempt, ["/a.ts", "/index.m3u8"]);
@@ -1887,6 +2053,80 @@ mod tests {
         .await;
         assert_eq!(response.status(), 206);
         assert_eq!(response.into_body().len(), 32);
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[test]
+    fn detached_cleanup_cannot_remove_a_new_staging_writer() {
+        let root = std::env::temp_dir().join(format!("hg-detached-cleanup-{}", std::process::id()));
+        let old_stage = stage_path(&root, 8);
+        std::fs::create_dir_all(&old_stage).unwrap();
+        std::fs::write(old_stage.join("old.ts"), b"old").unwrap();
+        let detached = discard_staging(&root, 8).unwrap();
+        std::fs::create_dir_all(&old_stage).unwrap();
+        std::fs::write(old_stage.join("new.ts"), b"new").unwrap();
+        assert!(cleanup_detached(&root, detached));
+        assert_eq!(std::fs::read(old_stage.join("new.ts")).unwrap(), b"new");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bind_retries_detached_garbage_without_deleting_committed_media() {
+        let root = std::env::temp_dir().join(format!("hg-trash-retry-{}", std::process::id()));
+        let package = path(&root, 9, 1);
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("video.mp4"), b"keep").unwrap();
+        let trash = root.join(".trash").join("old-delete");
+        std::fs::create_dir_all(&trash).unwrap();
+        std::fs::write(trash.join("fragment"), b"remove").unwrap();
+        Cache::default().bind(root.clone());
+        assert!(!root.join(".trash").exists());
+        assert_eq!(std::fs::read(package.join("video.mp4")).unwrap(), b"keep");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn large_local_mp4_responses_are_bounded_for_every_range_form() {
+        let root =
+            std::env::temp_dir().join(format!("hg-mp4-response-budget-{}", std::process::id()));
+        let cache = Cache::default();
+        cache.bind(root.clone());
+        let package = path(&root, 17, 1);
+        fs::create_dir_all(&package).await.unwrap();
+        let file = fs::File::create(package.join("video.mp4")).await.unwrap();
+        let len = 3 * 1024 * 1024 * 1024u64;
+        file.set_len(len).await.unwrap();
+        drop(file);
+        for (range, start, size) in [
+            (Some("bytes=0-"), 0, MP4_RESPONSE_BYTES),
+            (Some("bytes=1024-3000000000"), 1024, MP4_RESPONSE_BYTES),
+            (
+                Some("bytes=-1000000000"),
+                len - 1_000_000_000,
+                MP4_RESPONSE_BYTES,
+            ),
+            (Some("bytes=100-131"), 100, 32),
+            (Some("bytes=-32"), len - 32, 32),
+        ] {
+            let response = serve(&cache, "/offline/17/1/video.mp4", range).await;
+            assert_eq!(response.status(), 206, "{range:?}");
+            assert_eq!(response.headers()[header::CONTENT_LENGTH], size.to_string());
+            assert_eq!(
+                response.headers()[header::CONTENT_RANGE],
+                format!("bytes {start}-{}/{len}", start + size - 1)
+            );
+            assert_eq!(response.body().len() as u64, size);
+        }
+        let response = serve(&cache, "/offline/17/1/video.mp4", None).await;
+        assert_eq!(response.status(), 400);
+        assert_eq!(response.headers()[header::ACCEPT_RANGES], "bytes");
+        assert!(response.body().len() < 128);
+        let response = serve(&cache, "/offline/17/1/video.mp4", Some("bytes=4000000000-")).await;
+        assert_eq!(response.status(), 416);
+        assert_eq!(
+            response.headers()[header::CONTENT_RANGE],
+            format!("bytes */{len}")
+        );
         fs::remove_dir_all(root).await.unwrap();
     }
 }

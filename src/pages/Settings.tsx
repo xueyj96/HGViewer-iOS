@@ -1,13 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api, APP_NAME, APP_VERSION, hostOf, isIos, platformLabel, type DownloadSettings, type UpdateInfo } from "../api";
-import { useStore } from "../store";
+import { HISTORY_LIMIT, useStore } from "../store";
 import { CompactAction, ConfirmAction, Modal, PageStatus, Toggle } from "../components/ui";
 import { IOSCloseButton, IOSPageBar } from "../components/IOSPageBar";
 import { useIOSSymbols } from "../components/IOSSymbol";
 import AccountCard from "../components/AccountCard";
 import LinePicker from "../components/LinePicker";
 import PlaybackSidebarSettings from "../components/PlaybackSidebarSettings";
-import { IBack, IBoltF, IBroom, IChevR, IDownload, IHeart, IInfo, ILink, ILockF, IMoon, IRefresh, ISettings, ISun } from "../icons";
+import { IBack, IBoltF, IBroom, IChevR, IClock, IDownload, IHeart, IInfo, ILink, ILockF, IMoon, IRefresh, ISettings, ISun } from "../icons";
 
 const Section = ({ title, children }: { title: string; children: ReactNode }) => (
   <>
@@ -38,9 +38,10 @@ function DownloadSettingRow({ label, description, unit, icon, value, disabled, o
 /* 独立设置页：线路 / 外观 / 本地数据 / 清理缓存 / 网络诊断 / 关于
    入口：Windows 侧栏「设置」、Android「我的」右上角齿轮 */
 export default function Settings({ onBack, wide }: { onBack: () => void; wide: boolean }) {
-  const { theme, themePreference, setTheme, favs, history, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity, toast } = useStore();
+  const { theme, themePreference, setTheme, favs, history, clearHistory, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity, toast } = useStore();
   const [about, setAbout] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
+  const [historyClearOpen, setHistoryClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [clearError, setClearError] = useState("");
   const [lineOpen, setLineOpen] = useState(false);
@@ -193,6 +194,15 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 <div className="text-[10.5px] text-mut">{favs.length} 部收藏 · {history.length} 条观看记录</div>
               </div>
             </div>
+            <button type="button" disabled={history.length === 0} onClick={() => setHistoryClearOpen(true)}
+              className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-40">
+              <span aria-hidden="true" className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-danger">{symbol("clock", <IClock size={16} />)}</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[12.5px] text-danger">清空观看历史</div>
+                <div className="text-[10.5px] text-mut">保留最近 {HISTORY_LIMIT} 部剧的记录与续播进度</div>
+              </div>
+              {symbol("chevron.right", <IChevR size={15} />, 15, "text-mut")}
+            </button>
             <button onClick={() => setClearOpen(true)} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
               <span className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-primary">{symbol("trash", <IBroom size={16} />)}</span>
               <div className="flex-1 min-w-0">
@@ -328,6 +338,11 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
           <button onClick={() => setAbout(false)} className="hg-ios-primary mt-4 w-full min-h-11 rounded-(--r-ctl) bg-s3 text-[13px] font-semibold text-on pressable">知道了</button>
         </div>
       </Modal>
+
+      <ConfirmAction open={historyClearOpen} title="清空观看历史"
+        message="清空全部观看记录和续播进度？收藏与已下载分集会保留。" confirm="清空历史"
+        onCancel={() => setHistoryClearOpen(false)}
+        onConfirm={() => { clearHistory(); setHistoryClearOpen(false); }} />
 
       <ConfirmAction open={clearOpen} title="清理缓存"
         message="清理封面与播放列表的临时缓存？收藏、历史、登录状态和已下载分集都会保留。"

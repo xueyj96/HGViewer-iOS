@@ -7,7 +7,7 @@ import { ShowCoverCard, ShowCoverGrid } from "../components/ShowCoverGrid";
 import { useIOSCoverMenu, type DownloadAction } from "../components/IOSCoverMenu";
 import { useOfflineStatus } from "../components/useOfflineStatus";
 import { CacheDeleteDialog, CachePageFrame, cacheSize } from "../components/CachePageFrame";
-import { CompactAction, PageStatus } from "../components/ui";
+import { CompactAction, EmptyStatus, PageStatus } from "../components/ui";
 import { useStore } from "../store";
 
 const episodeButton = (cached: boolean) =>
@@ -155,7 +155,7 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
       <CompactAction disabled={busy} onClick={() => void run(api.offlineBackgroundStart)}>后台下载</CompactAction>
     </div>
   );
-  const cacheSummary = state && (id === undefined ? "缓存占用"
+  const cacheSummary = state && (id === undefined ? (groups.size ? "缓存占用" : undefined)
     : episodes !== undefined ? `已缓存 ${cachedCount} / ${options.length} 集`
     : `已缓存 ${saved.length}${show ? ` / ${allEpisodes.length}` : ""} 集`);
   const speed = downloadSpeed(detailJob);
@@ -239,7 +239,7 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
         </button>
       )}
       {groups.size === 0 && state && id === undefined && !readError && (
-        <PageStatus title="暂无离线缓存" detail="可在播放器选集缓存。" />
+        <EmptyStatus>暂无离线缓存</EmptyStatus>
       )}
       {id === undefined && groups.size > 0 && (
         <ShowCoverGrid compact={!wide}>
@@ -270,7 +270,7 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
         </ShowCoverGrid>
       )}
       {id !== undefined && state && allEpisodes.length === 0 && episodes === undefined && !detailJob && (
-        <p className="rounded-(--r-md) bg-s2 p-4 text-sm text-mut">这部剧还没有已缓存的集数。</p>
+        <EmptyStatus>暂无已缓存分集</EmptyStatus>
       )}
       {id !== undefined && episodes === undefined && allEpisodes.length > 0 && (
         <>

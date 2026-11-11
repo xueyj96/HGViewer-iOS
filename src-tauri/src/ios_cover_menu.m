@@ -84,11 +84,11 @@
                     id:coverID episode:nil attributes:attributes]];
             }
         } else {
-            if ([cover[@"can_cache"] boolValue]) {
+            if (![cover[@"unavailable"] boolValue] && [cover[@"can_cache"] boolValue]) {
                 [actions addObject:[self action:@"cache" title:@"缓存剧集" symbol:@"arrow.down.circle"
                     id:coverID episode:nil attributes:0]];
             }
-            if (self.history) {
+            if (self.history && ![cover[@"unavailable"] boolValue]) {
                 [actions addObject:[self action:@"restart" title:@"从头播放" symbol:@"play"
                     id:coverID episode:nil attributes:0]];
             }

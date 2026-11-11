@@ -42,6 +42,13 @@ impl Default for TransferOptions {
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub(super) enum MediaKind {
+    Hls,
+    Mp4,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum FailureReason {
     Dns,
     Timeout,
@@ -404,7 +411,9 @@ pub(super) async fn save_video(
 ) -> Result<(u64, bool), TransferFailure> {
     let capture = options.capture;
     let mut base = network_policy::parse_target(url).map_err(|_| "播放地址无效")?;
-    if base.path().to_ascii_lowercase().ends_with(".mp4") {
+    let mp4 = base.path().to_ascii_lowercase().ends_with(".mp4");
+    job.lock().unwrap().media_kind = Some(if mp4 { MediaKind::Mp4 } else { MediaKind::Hls });
+    if mp4 {
         let package = if options.resume_episode.is_some() {
             let package = stage.join(HLS_PACKAGE);
             reset_stage(&package).await?;
@@ -602,10 +611,11 @@ pub(super) async fn save_video(
                 if !resumable {
                     return Err(error);
                 }
-                // Keep successful siblings from the current batch when a segment fails.
+                // Drain only this batch, with a bounded grace period for slow
+                // siblings. Pause/cancel remains checked every 250 ms.
                 failure.get_or_insert(error);
                 drain_deadline
-                    .get_or_insert_with(|| tokio::time::Instant::now() + Duration::from_secs(3));
+                    .get_or_insert_with(|| tokio::time::Instant::now() + Duration::from_secs(20));
                 continue;
             }
         };

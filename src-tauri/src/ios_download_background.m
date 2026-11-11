@@ -22,7 +22,7 @@ typedef struct {
 } HGDownloadSnapshot;
 
 extern void hg_download_snapshot(HGDownloadSnapshot *snapshot);
-extern void hg_download_expired(void);
+extern void hg_download_expired(int recover);
 extern void hg_download_log(int event, int64_t code);
 extern int hg_download_has_background_work(void);
 extern int hg_download_resume_background(void);
@@ -31,7 +31,7 @@ enum {
     HGLogRegistered = 1, HGLogRegistrationFailed, HGLogSubmissionFailed, HGLogRunning,
     HGLogExpiredActive, HGLogExpiredInactive, HGLogFinished,
     HGLogRecoveryScheduled, HGLogRecoverySubmissionFailed,
-    HGLogRecoveryExpired, HGLogRecoveryFinished,
+    HGLogRecoveryExpired, HGLogRecoveryFinished, HGLogPaused,
 };
 
 API_AVAILABLE(ios(26.0))
@@ -109,7 +109,7 @@ static void hg_register_download_recovery(void) {
                     BGTask *expired = weakTask;
                     if (!expired || recoveryTask != expired) return;
                     if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
-                        hg_download_expired();
+                        hg_download_expired(1);
                         hg_schedule_download_recovery();
                     }
                     hg_download_log(HGLogRecoveryExpired, 0);
@@ -147,6 +147,13 @@ void hg_register_download_launch(void) {
     self.timer = nil;
     if (self.task) {
         self.task.expirationHandler = nil;
+        if (success) {
+            // This processing session ended successfully even when the person
+            // paused the download. Finish its progress before ending the system
+            // activity; persisted episode progress remains in the Rust queue.
+            self.task.progress.totalUnitCount = MAX(1, self.task.progress.totalUnitCount);
+            self.task.progress.completedUnitCount = self.task.progress.totalUnitCount;
+        }
         [self.task setTaskCompletedWithSuccess:success];
         self.task = nil;
     } else if (self.identifier) {
@@ -168,11 +175,11 @@ void hg_register_download_launch(void) {
         if (!success) {
             [self.task updateTitle:@"HGViewer 后台下载" subtitle:@"部分下载未完成，请回 App 查看"];
         } else if (paused) {
-            [self.task updateTitle:@"HGViewer 后台下载" subtitle:@"下载已停止，可回 App 查看"];
+            [self.task updateTitle:@"HGViewer 下载已暂停" subtitle:@"进度已保存，可在 App 中继续"];
         } else if (self.task) {
             self.task.progress.completedUnitCount = self.task.progress.totalUnitCount;
         }
-        hg_download_log(HGLogFinished, success);
+        hg_download_log(paused && success ? HGLogPaused : HGLogFinished, success);
         if (UIApplication.sharedApplication.applicationState == UIApplicationStateBackground) {
             hg_schedule_download_recovery();
         }
@@ -230,14 +237,12 @@ static void hg_request_lease(void) {
                 if (expired.finished) return;
                 BOOL foreground = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
                 hg_download_log(foreground ? HGLogExpiredActive : HGLogExpiredInactive, 0);
-                if (!foreground) {
-                    if (hg_download_background_allowed()) {
-                        hg_download_expired();
-                        hg_schedule_download_recovery();
-                    } else hg_download_enter_background();
-                }
+                // iOS also uses this callback for a person's cancellation.
+                // Stop in either app state and never restart it behind their back.
+                hg_download_expired(0);
+                [BGTaskScheduler.sharedScheduler cancelTaskRequestWithIdentifier:hg_recovery_identifier()];
                 [expired.task updateTitle:@"HGViewer 后台下载"
-                                 subtitle:foreground ? @"下载在 App 内继续" : @"后台已中断，回 App 自动继续"];
+                                 subtitle:@"下载已停止，回 App 可继续"];
                 [expired finish:foreground ? HGIdle : HGExpired success:NO];
             });
         };
@@ -305,6 +310,16 @@ static void hg_resume_downloads(void) {
 #endif
 }
 
+// Keep recovery scheduled before iOS can suspend this process, including when
+// the continued-processing lease was rejected. Scheduling does not restart a
+// manually paused job; the Rust queue owns that policy.
+static void hg_enter_download_background(void) {
+    hg_download_enter_background();
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 260000
+    if (@available(iOS 26.0, *)) hg_schedule_download_recovery();
+#endif
+}
+
 void hg_observe_download_foreground(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
@@ -313,18 +328,18 @@ void hg_observe_download_foreground(void) {
             }];
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification
             object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
-                hg_download_enter_background();
+                hg_enter_download_background();
             }];
         UIApplicationState state = UIApplication.sharedApplication.applicationState;
         if (state == UIApplicationStateActive) hg_resume_downloads();
-        else if (state == UIApplicationStateBackground) hg_download_enter_background();
+        else if (state == UIApplicationStateBackground) hg_enter_download_background();
     });
 }
 
 void hg_refresh_download_background_policy(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (UIApplication.sharedApplication.applicationState == UIApplicationStateBackground) {
-            hg_download_enter_background();
+            hg_enter_download_background();
         }
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 260000
         if (@available(iOS 26.0, *)) {

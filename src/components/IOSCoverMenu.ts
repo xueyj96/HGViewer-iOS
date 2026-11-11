@@ -64,6 +64,7 @@ export function useIOSCoverMenu(
           preview: previewRect && { ...previewRect, radius },
           browse_kind: card.dataset.hgBrowseKind,
           can_cache: card.dataset.hgCanCache === "true",
+          unavailable: card.dataset.hgUnavailable === "true",
           ep: card.dataset.hgMenuEpisode ? Number(card.dataset.hgMenuEpisode) : undefined,
           download_action: card.dataset.hgDownloadAction,
           download_blocked: card.dataset.hgDownloadBlocked === "true",
@@ -82,7 +83,7 @@ export function useIOSCoverMenu(
     if (grid) observer.observe(grid);
     const mutations = new MutationObserver(schedule);
     mutations.observe(container, { subtree: true, childList: true, attributes: true,
-      attributeFilter: ["inert", "data-hg-menu-card", "data-hg-browse-kind", "data-hg-menu-episode", "data-hg-can-cache", "data-hg-download-action", "data-hg-download-blocked"] });
+      attributeFilter: ["inert", "data-hg-menu-card", "data-hg-browse-kind", "data-hg-menu-episode", "data-hg-can-cache", "data-hg-unavailable", "data-hg-download-action", "data-hg-download-blocked"] });
     const workspace = container.closest(".win-main");
     for (let ancestor = container.parentElement; ancestor && ancestor !== workspace; ancestor = ancestor.parentElement) {
       mutations.observe(ancestor, { attributes: true, attributeFilter: ["inert"] });

@@ -4,7 +4,7 @@
 //! 所以图片与视频统一走本地自定义协议（Windows/Android 为 `http://hg.localhost`，
 //! macOS 为 `hg://localhost`，见 [`LOCAL_ORIGIN`]）。
 
-use crate::net::fetch_bytes;
+use crate::net::{fetch_bytes, fetch_bytes_bounded};
 use aes::cipher::{BlockDecrypt, KeyInit};
 use aes::Aes128;
 use once_cell::sync::Lazy;
@@ -32,6 +32,9 @@ static PL_CACHE: Lazy<Mutex<HashMap<String, Arc<String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 const IMG_CACHE_MAX: usize = 240;
+const IMAGE_LIMIT: usize = 2 * 1024 * 1024;
+const IMG_CACHE_BYTES: usize = 24 * 1024 * 1024;
+const PLAYLIST_LIMIT: usize = 512 * 1024;
 const PL_CACHE_MAX: usize = 60;
 
 fn cache_put<V: Clone>(map: &Mutex<HashMap<String, V>>, key: String, val: V, max: usize) {
@@ -44,13 +47,25 @@ fn cache_put<V: Clone>(map: &Mutex<HashMap<String, V>>, key: String, val: V, max
     m.insert(key, val);
 }
 
-/* ───────────────────────── AES ───────────────────────── */
-
-pub(crate) fn aes_cbc_decrypt(data: &[u8], key: &[u8], iv: &[u8; 16]) -> Option<Vec<u8>> {
-    let mut data = data.to_vec();
-    aes_cbc_decrypt_in_place(&mut data, key, iv)?;
-    Some(data)
+fn image_cache_put(map: &mut HashMap<String, Arc<Vec<u8>>>, key: String, value: Arc<Vec<u8>>) {
+    if value.len() > IMAGE_LIMIT {
+        return;
+    }
+    // Remove a replacement first so its bytes are not counted twice.
+    map.remove(&key);
+    let mut used: usize = map.values().map(|bytes| bytes.len()).sum();
+    while map.len() >= IMG_CACHE_MAX || used + value.len() > IMG_CACHE_BYTES {
+        let Some(old) = map.keys().next().cloned() else {
+            break;
+        };
+        if let Some(bytes) = map.remove(&old) {
+            used -= bytes.len();
+        }
+    }
+    map.insert(key, value);
 }
+
+/* ───────────────────────── AES ───────────────────────── */
 
 pub(crate) fn aes_cbc_decrypt_in_place(data: &mut [u8], key: &[u8], iv: &[u8; 16]) -> Option<()> {
     if data.is_empty() || data.len() % 16 != 0 {
@@ -105,7 +120,7 @@ pub(crate) fn cached_cover(url: &str) -> Option<Arc<Vec<u8>>> {
         .lock()
         .unwrap()
         .get(url)
-        .filter(|bytes| bytes.len() <= 2 * 1024 * 1024 && image_kind(bytes).is_some())
+        .filter(|bytes| bytes.len() <= IMAGE_LIMIT && image_kind(bytes).is_some())
         .cloned()
 }
 
@@ -115,17 +130,17 @@ pub async fn load_image(url: &str) -> Result<(String, Arc<Vec<u8>>), String> {
         let kind = image_kind(&hit).unwrap_or("image/jpeg");
         return Ok((kind.to_string(), hit));
     }
-    let (_, bytes) = fetch_bytes(url).await?;
+    let (_, mut bytes) = fetch_bytes_bounded(url, IMAGE_LIMIT).await?;
     let plain = if image_kind(&bytes).is_some() {
         bytes
     } else {
-        let dec =
-            aes_cbc_decrypt(&bytes, IMG_KEY, IMG_IV).ok_or_else(|| "封面解密失败".to_string())?;
-        strip_padding(dec)
+        aes_cbc_decrypt_in_place(&mut bytes, IMG_KEY, IMG_IV)
+            .ok_or_else(|| "封面解密失败".to_string())?;
+        strip_padding(bytes)
     };
     let kind = image_kind(&plain).unwrap_or("image/jpeg").to_string();
     let arc = Arc::new(plain);
-    cache_put(&IMG_CACHE, url.to_string(), arc.clone(), IMG_CACHE_MAX);
+    image_cache_put(&mut IMG_CACHE.lock().unwrap(), url.to_string(), arc.clone());
     Ok((kind, arc))
 }
 
@@ -203,7 +218,7 @@ pub async fn load_playlist(url: &str, prefix: &str) -> Result<Arc<String>, Strin
     if let Some(hit) = PL_CACHE.lock().unwrap().get(url).cloned() {
         return Ok(hit);
     }
-    let (_, bytes) = fetch_bytes(url).await?;
+    let (_, bytes) = fetch_bytes_bounded(url, PLAYLIST_LIMIT).await?;
     let text = std::str::from_utf8(&bytes).map_err(|_| "播放列表不是 UTF-8 文本")?;
     if !text.trim_start_matches('\u{feff}').starts_with("#EXTM3U") {
         return Err("响应不是 HLS 播放列表".into());
@@ -369,6 +384,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn image_cache_enforces_byte_budget_and_does_not_double_count_replacements() {
+        let mut cache = HashMap::new();
+        let image = Arc::new(vec![0u8; IMAGE_LIMIT]);
+        for index in 0..20 {
+            image_cache_put(&mut cache, index.to_string(), image.clone());
+        }
+        assert_eq!(cache.len(), IMG_CACHE_BYTES / IMAGE_LIMIT);
+        assert_eq!(
+            cache.values().map(|bytes| bytes.len()).sum::<usize>(),
+            IMG_CACHE_BYTES
+        );
+        let key = cache.keys().next().unwrap().clone();
+        image_cache_put(&mut cache, key.clone(), image);
+        assert_eq!(cache.len(), IMG_CACHE_BYTES / IMAGE_LIMIT);
+        assert!(cache.contains_key(&key));
+        image_cache_put(
+            &mut cache,
+            "oversize".into(),
+            Arc::new(vec![0; IMAGE_LIMIT + 1]),
+        );
+        assert!(!cache.contains_key("oversize"));
+    }
+
+    #[test]
     fn dateranges_keep_timing_and_scte_metadata_but_drop_external_resources() {
         let line = "#EXTM3U\n#EXT-X-DATERANGE:ID=\"event\",START-DATE=\"2026-11-07T00:00:00Z\",DURATION=4,SCTE35-OUT=0xFC,X-TEXT=\"a,b\",X-ASSET-URI=\"https://evil.example/ad\",X-ASSET-LIST=\"https://evil.example/list.json\"\n";
         let out = rewrite_playlist("https://cdn.example/master.m3u8", line, LOCAL_ORIGIN);
@@ -506,8 +545,8 @@ mod tests {
             prev = out_block;
         }
 
-        let decrypted = aes_cbc_decrypt(&encrypted, IMG_KEY, IMG_IV).expect("decrypt");
-        let stripped = strip_padding(decrypted);
+        aes_cbc_decrypt_in_place(&mut encrypted, IMG_KEY, IMG_IV).expect("decrypt");
+        let stripped = strip_padding(encrypted);
         assert_eq!(stripped, plain);
         assert_eq!(image_kind(&stripped), Some("image/jpeg"));
     }
