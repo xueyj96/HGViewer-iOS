@@ -23,6 +23,27 @@
   --ios-tab-material: rgba(29, 29, 31, .64);
   --ios-media-chrome: rgba(20, 20, 23, .56);
   --ios-media-border: rgba(255, 255, 255, .14);
+  /* Role dimensions: callers choose a role instead of a local size. */
+  --ios-content-gap: 8px;
+  --ios-section-gap: 16px;
+  --ios-card-inset: 8px;
+  --ios-reading-inset: 12px;
+  --ios-row-inset: 12px;
+  --ios-row-single: 52px;
+  --ios-row-double: 60px;
+  --ios-helper-face: 28px;
+  --ios-field-inset: 12px;
+  --ios-font-body: 14px;
+  --ios-line-body: 20px;
+  --ios-font-reading: 14px;
+  --ios-line-reading: 22px;
+  --ios-font-meta: 11px;
+  --ios-line-meta: 16px;
+  --ios-font-title: 16px;
+  --ios-line-title: 24px;
+  --ios-caption-height: 80px;
+  --ios-caption-rail-gap: 8px;
+  --ios-navigation-gap: 8px;
   --ios-control-target: 44px;
   --ios-control-face: 36px;
   --ios-control-gap: 4px;
@@ -43,7 +64,8 @@
   --ios-header-top: calc(var(--sat, 0px) + var(--ios-control-gap));
   --ios-header-content-top: calc(var(--ios-header-top) + var(--ios-control-target) + 8px);
   --ios-navigation-bottom: calc(env(safe-area-inset-bottom, 0px) + 2 * var(--ios-control-gap) - var(--ios-compact-inset));
-  --ios-navigation-reserve: calc(var(--ios-navigation-bottom) + var(--ios-control-target) + var(--ios-control-gap));
+  --ios-navigation-reserve: calc(var(--ios-navigation-bottom) + var(--ios-control-target) + var(--ios-navigation-gap));
+  --ios-navigation-clearance: max(0px, calc(var(--ios-navigation-reserve) - var(--sab, 0px)));
   --ios-header-icon-size: 16px;
   --ios-media-icon-size: 20px;
   --ios-segment: #2c2c2e;
@@ -548,7 +570,7 @@ html.theme-light .plat-ios {
 }
 
 .plat-ios .hg-ios-settings-group > :is(button, div) {
-  min-height: 54px;
+  min-height: var(--ios-row-double);
 }
 
 .plat-ios .hg-ios-settings-page {
@@ -621,8 +643,8 @@ html.theme-light .plat-ios {
 }
 
 .plat-ios .hg-ios-switch {
-  --ios-switch-width: 51px;
-  --ios-switch-height: 31px;
+  --ios-switch-width: 40px;
+  --ios-switch-height: 24px;
   width: var(--ios-switch-width);
   height: var(--ios-switch-height);
   flex-shrink: 0;
@@ -643,32 +665,14 @@ html.theme-light .plat-ios {
 .plat-ios .hg-ios-switch > span {
   top: 2px;
   left: 2px;
-  width: 27px;
-  height: 27px;
+  width: 20px;
+  height: 20px;
   background: #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
   transition: transform .2s ease;
 }
 
 .plat-ios .hg-ios-switch[aria-pressed="true"] > span {
-  transform: translateX(20px);
-}
-
-.plat-ios .hg-ios-sidebar-settings .hg-ios-switch {
-  --ios-switch-width: 40px;
-  --ios-switch-height: 24px;
-}
-
-.plat-ios .hg-ios-sidebar-settings .hg-ios-switch[aria-pressed="false"] {
-  background: color-mix(in srgb, var(--p-on) 16%, var(--p-s3));
-}
-
-.plat-ios .hg-ios-sidebar-settings .hg-ios-switch > span {
-  width: 20px;
-  height: 20px;
-}
-
-.plat-ios .hg-ios-sidebar-settings .hg-ios-switch[aria-pressed="true"] > span {
   transform: translateX(16px);
 }
 
@@ -929,8 +933,8 @@ html:has(.hg-native-video.is-ready) body,
   position: absolute;
   z-index: 20;
   inset-inline: var(--ios-browse-start) var(--ios-browse-end);
-  bottom: calc(var(--sab) + 5px);
-  height: 72px;
+  bottom: calc(var(--sab) + var(--ios-control-gap));
+  height: calc(2 * var(--ios-control-target) + 3 * var(--ios-control-gap));
   pointer-events: none;
   border: .5px solid var(--ios-media-border);
   border-radius: var(--ios-group-radius);
@@ -972,7 +976,7 @@ html:has(.hg-native-video.is-ready) body,
 }
 
 .plat-ios .hg-ios-inline-controls > div {
-  gap: 3px;
+  gap: var(--ios-control-gap);
 }
 
 .plat-ios .hg-ios-inline-controls button {
@@ -988,8 +992,8 @@ html:has(.hg-native-video.is-ready) body,
 }
 
 .plat-ios .hg-ios-inline-controls .hg-range::-webkit-slider-thumb {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
 }
 
 /* The video fills the screen-sized stage. Safe-area offsets apply to controls only. */
@@ -1021,7 +1025,7 @@ html:has(.hg-native-video.is-ready) body,
 
 .plat-ios .hg-ios-feed-rail {
   inset-inline-end: 0;
-  bottom: calc(var(--sab) + var(--hg-player-bottom-inset) + 92px);
+  bottom: calc(var(--sab) + var(--hg-player-bottom-inset) + var(--ios-caption-height) + var(--ios-caption-rail-gap));
 }
 
 .plat-ios .hg-ios-full-rail {
@@ -1039,7 +1043,7 @@ html:has(.hg-native-video.is-ready) body,
 
   .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail) {
     --hg-rail-top: calc(var(--ios-header-top) + var(--ios-control-target) + var(--ios-control-gap));
-    --hg-rail-bottom: calc(var(--sab) + var(--hg-player-bottom-inset) + 52px);
+    --hg-rail-bottom: calc(var(--sab) + var(--hg-player-bottom-inset) + var(--ios-control-target) + var(--ios-control-gap));
     --hg-rail-columns: 1;
     display: grid;
     grid-template-columns: repeat(var(--hg-rail-columns), var(--ios-control-target));
@@ -1055,28 +1059,9 @@ html:has(.hg-native-video.is-ready) body,
   }
 
   .plat-ios .hg-ios-full-rail {
-    --hg-rail-bottom: calc(var(--sab) + 78px);
+    --hg-rail-bottom: calc(var(--sab) + 104px);
   }
 
-  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail):has(> button:nth-child(5)) {
-    --hg-rail-columns: 2;
-  }
-}
-
-@media (orientation: landscape) and (max-height: 375px) {
-  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail) {
-    row-gap: 2px;
-  }
-
-  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail):has(> button:nth-child(4)) {
-    --hg-rail-columns: 2;
-  }
-}
-
-@media (orientation: landscape) and (max-height: 389px) {
-  .plat-ios :is(.hg-ios-feed-rail, .hg-ios-full-rail):has(> button:nth-child(7)) {
-    --hg-rail-columns: 3;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1120,20 +1105,21 @@ html:has(.hg-native-video.is-ready) body,
 .plat-ios .hg-ios-list-row {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: var(--ios-content-gap);
   position: relative;
   width: 100%;
-  min-height: 52px;
-  padding: 7px 12px;
+  min-height: var(--ios-row-single);
+  padding: 4px var(--ios-row-inset);
   text-align: left;
-  font-size: 15px;
+  font-size: 14px;
+  line-height: 20px;
 }
 
 .plat-ios .hg-ios-list-row + .hg-ios-list-row::before {
   content: "";
   position: absolute;
   top: 0;
-  left: 53px;
+  left: calc(var(--ios-row-inset) + 32px + var(--ios-content-gap));
   right: 0;
   border-top: .5px solid var(--ios-divider);
 }
@@ -1144,8 +1130,8 @@ html:has(.hg-native-video.is-ready) body,
 
 .plat-ios .hg-ios-list-icon {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   place-items: center;
   flex-shrink: 0;
   border-radius: var(--ios-control-radius);
@@ -1154,7 +1140,7 @@ html:has(.hg-native-video.is-ready) body,
 }
 
 .plat-ios .hg-ios-search-content {
-  --ios-search-tag-height: 26px;
+  --ios-search-tag-height: var(--ios-helper-face);
 }
 
 .plat-ios .hg-ios-search-content .hg-ios-section-label {
@@ -1194,7 +1180,7 @@ html:has(.hg-native-video.is-ready) body,
   border-radius: var(--ios-group-radius);
   background: var(--p-s1);
   box-shadow: inset 0 0 0 .5px var(--ios-divider);
-  padding: calc(2 * var(--ios-control-gap));
+  padding: var(--ios-card-inset);
 }
 
 .plat-ios .hg-ios-content-card-next {
@@ -1210,7 +1196,7 @@ html:has(.hg-native-video.is-ready) body,
   position: relative;
   isolation: isolate;
   height: var(--ios-control-target);
-  padding-inline: 9px;
+  padding-inline: 8px;
   border-radius: var(--ios-control-radius);
   font-size: 12px;
   min-inline-size: var(--ios-control-target);
@@ -1231,8 +1217,8 @@ html:has(.hg-native-video.is-ready) body,
 }
 
 .plat-ios .hg-ios-account-row {
-  min-height: 66px;
-  padding: 10px 12px;
+  min-height: var(--ios-row-double);
+  padding: 8px var(--ios-row-inset);
   border: .5px solid var(--ios-divider);
   border-radius: var(--ios-group-radius);
   box-shadow: none;
@@ -1375,4 +1361,122 @@ html:has(.hg-native-video.is-ready) body,
     /* Keep the rail clear even when both landscape insets report zero. */
     --ios-playback-rail-min: 76px;
   }
+}
+
+/* Full-page account and line panels use the same content and navigation budget. */
+.plat-ios :is(.hg-ios-auth-page, .hg-ios-line-page) {
+  padding-top: calc(var(--ios-control-target) + 8px);
+  padding-bottom: max(0px, calc(var(--ios-navigation-reserve) - var(--sab)));
+}
+.plat-ios .hg-ios-auth-page {
+  padding-bottom: max(0px, calc(var(--ios-navigation-reserve) - var(--sab) - var(--hg-keyboard-inset, 0px)));
+}
+.plat-ios .hg-ios-auth-page .hg-ios-auth-form {
+  min-height: 0;
+  max-height: none;
+  flex: 0 1 auto;
+  margin-inline: var(--ios-browse-start) var(--ios-browse-end);
+  padding: calc(2 * var(--ios-control-gap));
+  background: var(--p-s1);
+  border: .5px solid var(--ios-divider);
+  border-radius: var(--ios-group-radius);
+}
+.plat-ios .hg-ios-auth-page .hg-ios-auth-form > [data-keyboard-scroll] {
+  min-height: 0;
+}
+
+.plat-ios .hg-ios-auth-host[data-compact-keyboard] .hg-ios-auth-form {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.plat-ios .hg-ios-auth-host[data-compact-keyboard] .hg-ios-auth-form > [data-keyboard-scroll] {
+  flex: none;
+  overflow: visible;
+}
+
+.plat-ios .hg-ios-line-row { padding: var(--ios-control-gap) calc(2 * var(--ios-control-gap)); }
+.plat-ios .hg-ios-line-page .hg-ios-cache-action-face { border-radius: var(--ios-control-radius); }
+
+/* Form, settings and content roles. */
+.plat-ios .hg-ios-input { padding-inline: var(--ios-field-inset); font-size: 16px; line-height: 24px; }
+.plat-ios .hg-ios-auth-fields { gap: var(--ios-content-gap); }
+.plat-ios .hg-ios-auth-error { font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.plat-ios .hg-ios-settings-row { min-height: var(--ios-row-double); padding-block: 8px; }
+.plat-ios :is(.hg-setting-title, .hg-ios-settings-row > div > div:first-child) { font-size: 13px; line-height: 20px; }
+.plat-ios :is(.hg-setting-detail, .hg-ios-settings-row > div > div:nth-child(2)) { font-size: 11px; line-height: 16px; margin-top: 4px; }
+.plat-ios .hg-ios-settings-row select { min-height: var(--ios-control-target); padding-inline: var(--ios-field-inset); font-size: 14px; line-height: 20px; border-radius: var(--ios-control-radius); }
+.plat-ios .hg-ios-cache-action-face { height: var(--ios-helper-face); font-size: 11px; line-height: 16px; padding-inline: 10px; gap: var(--ios-control-gap); }
+.plat-ios .hg-ios-about-page { height: 100%; min-height: 0; padding-top: calc(var(--ios-control-target) + var(--ios-content-gap)); padding-bottom: max(0px, calc(var(--ios-navigation-reserve) - var(--sab))); }
+.plat-ios .hg-ios-about-page > .scroll-y { padding: 0 var(--ios-browse-end) 8px var(--ios-browse-start); }
+.plat-ios .hg-cover-title { font-size: 12px; line-height: 16px; }
+.plat-ios .hg-content-badge { font-size: 10px; line-height: 14px; padding: 2px 6px; border-radius: var(--ios-control-radius); }
+.plat-ios .hg-detail-title { font-size: var(--ios-font-title); line-height: var(--ios-line-title); }
+.plat-ios :is(.hg-reading-body, .article-body) { font-size: var(--ios-font-reading); line-height: var(--ios-line-reading); color: var(--p-on); overflow-wrap: anywhere; }
+.plat-ios .article-body :is(p, ul, ol, blockquote) { margin-block: 0 8px; }
+.plat-ios .article-body :is(h1, h2, h3) { margin-block: 16px 8px; font-size: 16px; line-height: 24px; }
+.plat-ios .hg-post-title { font-size: 18px; line-height: 24px; }
+.plat-ios .hg-page-status { padding: var(--ios-reading-inset); }
+.plat-ios .hg-page-status-title { font-size: 14px; line-height: 20px; }
+.plat-ios .hg-page-status-detail { font-size: 12px; line-height: 18px; }
+.plat-ios .hg-empty-status { padding-block: 32px; font-size: 14px; line-height: 20px; }
+.plat-ios .hg-loading-initial { padding-block: 32px; }
+.plat-ios .hg-loading-tail { padding-block: 16px; }
+.plat-ios .hg-loading-button { padding: 0; }
+.plat-ios .hg-loading-media { padding: 0; }
+.plat-ios .hg-toast-host { padding-inline: 16px; bottom: max(calc(var(--ios-navigation-reserve) + 8px), calc(var(--ios-viewport-bottom-inset, 0px) + 8px)) !important; }
+.plat-ios .hg-toast { max-width: min(360px, 100%); padding: 8px 12px; gap: 8px; }
+.plat-ios .hg-toast > span { min-width: 0; font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
+
+/* The track remains thin; its complete interaction box owns 44 points. */
+.plat-ios .hg-ios-seek-target { height: var(--ios-control-target); margin-top: 0; }
+.plat-ios .hg-ios-caption-progress > div:first-child { height: 3px; }
+.plat-ios .hg-ios-full-seek { bottom: calc(var(--sab) + 56px) !important; height: var(--ios-control-target) !important; }
+.plat-ios .hg-ios-full-seek > div > div:first-child { top: 50%; bottom: auto; translate: 0 -50%; height: 3px; }
+.plat-ios .hg-ios-full-actions { bottom: calc(var(--sab) + 8px) !important; height: var(--ios-control-target); }
+.plat-ios .hg-ios-full-action { position: relative; isolation: isolate; display: flex; align-items: center; justify-content: center; min-width: var(--ios-control-target); height: var(--ios-control-target); padding-block: 4px; border-radius: var(--ios-group-radius); background: transparent; }
+.plat-ios .hg-ios-full-action-face { display: flex; align-items: center; justify-content: center; gap: 4px; height: var(--ios-control-face); min-width: var(--ios-control-face); padding-inline: 8px; border: .5px solid var(--ios-media-border); border-radius: var(--ios-control-radius); background: var(--ios-media-chrome); }
+.plat-ios .hg-ios-speed-dismiss { min-height: var(--ios-control-target); }
+.plat-ios .hg-ios-speed-dismiss-face { display: flex; align-items: center; min-height: var(--ios-control-face); padding: 4px 12px; border-radius: var(--ios-control-radius); }
+.plat-ios .hg-ios-article-seek-target { height: var(--ios-control-target); display: flex; align-items: center; }
+.plat-ios .hg-ios-article-seek-target > .hg-range { display: block; height: var(--ios-control-target); margin: 0; }
+.plat-ios .hg-ios-inline-controls .hg-range::-webkit-slider-runnable-track { height: 4px; }
+.plat-ios .hg-ios-inline-controls .hg-range::-webkit-slider-thumb { margin-top: -5px; }
+
+/* Native select semantics, with browser-owned customizable rendering when supported. */
+@supports (appearance: base-select) {
+  .plat-ios .hg-ios-settings-row select,
+  .plat-ios .hg-ios-settings-row select::picker(select) { appearance: base-select; }
+  .plat-ios .hg-ios-settings-row select::picker(select) { padding: 4px; margin-block: 4px; border: .5px solid var(--ios-divider); border-radius: var(--ios-group-radius); background: var(--p-s1); color: var(--p-on); }
+  .plat-ios .hg-ios-settings-row select option { display: flex; align-items: center; gap: 8px; min-height: var(--ios-control-target); padding-inline: 12px; border-radius: var(--ios-control-radius); font-size: 14px; line-height: 20px; }
+  .plat-ios .hg-ios-settings-row select option:checked { color: var(--p-primary); background: var(--p-pc); }
+}
+
+/* Shared action-list appearance, independent from UIKit's menu surface. */
+.plat-ios .hg-cover-action-menu { padding: 4px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; border: .5px solid var(--ios-divider); border-radius: var(--ios-group-radius); background: var(--p-s1); color: var(--p-on); box-shadow: 0 8px 28px rgba(0,0,0,.24); }
+.plat-ios .hg-cover-action-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--ios-control-target); padding: 8px 12px; border: 0; border-radius: var(--ios-control-radius); background: transparent; color: var(--p-on); text-align: left; font-size: 14px; line-height: 20px; }
+.plat-ios .hg-cover-action-item:focus-visible { outline: 2px solid var(--p-primary); outline-offset: -2px; }
+.plat-ios .hg-cover-action-item:active { background: var(--p-s3); }
+.plat-ios .hg-cover-action-item[data-destructive="true"] { color: var(--p-danger, #ff697c); }
+.plat-ios .hg-cover-action-item:disabled { opacity: .4; }
+.plat-ios .hg-cover-action-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.plat-ios .hg-cover-action-hint { font-size: 11px; line-height: 16px; color: var(--p-mut); }
+
+.plat-ios :where(.hg-meta) { font-size: var(--ios-font-meta); line-height: var(--ios-line-meta); }
+.plat-ios .article-body { max-width: 640px; margin-inline: auto; }
+
+.plat-ios .hg-ios-about-content > * { margin-top: 8px; }
+.plat-ios .hg-ios-about-content > :first-child { margin-top: 0; }
+.plat-ios .hg-ios-about-content > :is(div, p) { padding: var(--ios-card-inset); border-radius: var(--ios-group-radius); background: var(--p-s1); box-shadow: inset 0 0 0 .5px var(--ios-divider); }
+.plat-ios .hg-ios-about-content > p { font-size: 14px; line-height: 22px; }
+@supports (appearance: base-select) { .plat-ios .hg-ios-settings-row select::picker(select) { min-width: 128px; } }
+.plat-ios [data-hg-menu-card] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.plat-ios [data-hg-menu-card] img { pointer-events: none; }
+.plat-ios [data-hg-menu-card]:focus-visible { outline: 2px solid var(--p-primary); outline-offset: 2px; }
+
+.plat-ios .hg-ios-quality-options { max-height: max(var(--ios-control-target), min(calc(6 * var(--ios-control-target)), calc(100dvh - var(--sat) - var(--sab) - 3 * var(--ios-control-target)))); }
+.plat-ios .hg-ios-detail-metrics { font-size: var(--ios-font-meta); line-height: var(--ios-line-meta); }
+
+@media (max-height: 260px) {
+  .plat-ios .hg-ios-quality-description,
+  .plat-ios .hg-ios-sheet:has(.hg-ios-quality-options) .hg-ios-sheet-grabber { display: none; }
 }

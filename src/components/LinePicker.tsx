@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { api, hostOf, isIos, isMobile, type LineItem, type LineProbe, type LineState } from "../api";
 import { useStore } from "../store";
 import { CompactAction, Modal, PageStatus, Sheet } from "./ui";
-import { IOSCloseButton } from "./IOSPageBar";
-import { ICheck, IClose, IRefresh, ISettings } from "../icons";
+import { IOSPageBar } from "./IOSPageBar";
+import { IBoltF, ICheck, IClose, IRefresh, ISettings } from "../icons";
 
 type ProbeMap = Record<string, LineProbe>;
 
@@ -13,13 +13,13 @@ function Row({ item, current, probe, busy, disabled, onPick, onProbe }: {
   onPick: (url: string) => void; onProbe: (url: string) => void;
 }) {
   return (
-    <div className={`flex items-center gap-2 px-3.5 py-2.5 ${current ? "bg-s3/70" : ""}`}>
+    <div className={`hg-ios-line-row hg-ios-settings-row flex items-center gap-2 px-3.5 py-2.5 ${current ? "bg-s3/70" : ""}`}>
       <button onClick={() => onPick(item.url)} disabled={disabled} className="min-h-11 flex-1 min-w-0 text-left pressable disabled:opacity-60">
-        <div className="flex items-center gap-1.5 text-[12.5px] text-on">
+        <div className="flex items-center gap-1.5 text-[13px] leading-5 text-on">
           <span className="truncate">{item.name || item.host || hostOf(item.url)}</span>
           {current && <ICheck size={13} className="text-mint shrink-0" />}
         </div>
-        <div className="text-[10.5px] text-mut truncate mt-0.5">{item.url}</div>
+        <div className="text-[11px] leading-4 text-mut truncate mt-0.5">{item.url}</div>
       </button>
       <span
         title={probe ? (probe.status ? `HTTP ${probe.status}` : (probe.error || "")) : ""}
@@ -31,7 +31,7 @@ function Row({ item, current, probe, busy, disabled, onPick, onProbe }: {
   );
 }
 
-/* 线路选择：桌面居中弹窗，移动端底部抽屉 */
+/* iOS shares full-page chrome; other platforms retain their existing surface. */
 export default function LinePicker({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { toast, onLineChanged } = useStore();
   const [state, setState] = useState<LineState | null>(null);
@@ -121,33 +121,43 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
   const fixed = state?.fixed || [];
   const busyAll = !!probing || !!switching;
 
+  const quickProbe = () => {
+    setSuggested(null);
+    void probe([...fixed, ...(mirrors || []).slice(0, 3)], "quick");
+  };
+
   const body = (
-    <div className="flex flex-col min-h-0" style={{ maxHeight: isMobile ? "74vh" : "min(72vh, 620px)" }}>
-      <div className="hg-ios-browse-content shrink-0 flex items-center gap-2 px-4 pt-3 pb-2">
+    <div className="hg-ios-line-page flex flex-col min-h-0" style={isIos ? { height: "100%" } : { maxHeight: isMobile ? "74vh" : "min(72vh, 620px)" }}>
+      {isIos && <IOSPageBar label="线路" overlay hidden={!open} onBack={onClose} endAction={
+        <button type="button" aria-label="查找可用线路" onClick={quickProbe} disabled={busyAll || loadingMirrors || !fixed.length}
+          className="hg-ios-floating-button hg-ios-header-square grid place-items-center disabled:opacity-50">
+          <IBoltF size={16} />
+        </button>
+      }>
+        <h1 className="min-w-0 flex-1 truncate text-center text-[13px] font-semibold">线路</h1>
+      </IOSPageBar>}
+      {!isIos && <div className="hg-ios-browse-content shrink-0 flex items-center gap-2 px-4 pt-3 pb-2">
         <span className="w-8 h-8 rounded-full bg-s3 flex items-center justify-center text-primary"><ISettings size={16} /></span>
         <div className="flex-1 min-w-0">
           <div className="text-[14px] font-bold text-on leading-tight">线路</div>
           <div className="text-[10.5px] text-mut mt-0.5 truncate">当前：{state ? hostOf(state.base) : stateLoading ? "读取中…" : "暂不可用"}</div>
         </div>
-        {isIos ? <IOSCloseButton onClose={onClose} /> : <button onClick={onClose} aria-label="关闭" className="w-8 h-8 rounded-full bg-s3/80 flex items-center justify-center text-mut pressable"><IClose size={16} /></button>}
-      </div>
+        {<button onClick={onClose} aria-label="关闭" className="w-8 h-8 rounded-full bg-s3/80 flex items-center justify-center text-mut pressable"><IClose size={16} /></button>}
+      </div>}
 
       <div className="hg-ios-browse-content flex-1 scroll-y px-3 pb-4">
-        <div className="mb-2 rounded-(--r-md) bg-s2 px-3 py-2.5">
-          <CompactAction onClick={() => {
-            setSuggested(null);
-            const candidates = [...fixed, ...(mirrors || []).slice(0, 3)];
-            void probe(candidates, "quick");
-          }} disabled={busyAll || loadingMirrors || !fixed.length}>
+        {!isIos && <div className="mb-2 rounded-(--r-md) bg-s2 px-3 py-2.5">
+          <CompactAction onClick={quickProbe} disabled={busyAll || loadingMirrors || !fixed.length}>
             {probing === "quick" ? "正在检测…" : "找可用线路"}
           </CompactAction>
-          {suggested && suggested.url !== state?.base && (
-            <div className="mt-2 flex items-center gap-2">
-              <span className="min-w-0 flex-1 break-all text-[11px] text-on">首页可加载：{hostOf(suggested.url)}</span>
-              <CompactAction onClick={() => void pick(suggested.url)} disabled={busyAll}>切换到此线路</CompactAction>
-            </div>
-          )}
-        </div>
+        </div>}
+        {probing === "quick" && <p role="status" className="mb-2 text-xs text-mut">正在检测可用线路…</p>}
+        {suggested && suggested.url !== state?.base && (
+          <div className="hg-ios-content-card mb-2 flex items-center gap-2 rounded-(--r-md) bg-s2 px-3 py-2">
+            <span className="min-w-0 flex-1 truncate text-[12px] text-on">可用：{hostOf(suggested.url)}</span>
+            <CompactAction onClick={() => void pick(suggested.url)} disabled={busyAll}>切换线路</CompactAction>
+          </div>
+        )}
         <div className="flex items-center gap-2 px-1 mt-1 mb-1.5">
           <span className="text-[10.5px] font-semibold text-dim tracking-wide">固定线路</span>
           <span className="text-[10px] text-dim">需代理 / 非大陆网络</span>
@@ -195,13 +205,14 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
           </div>
         )}
 
-        <div className="text-[10px] text-dim leading-relaxed px-1 mt-4">
+        {!isIos && <div className="text-[10px] text-dim leading-relaxed px-1 mt-4">
           点「检测」会验证这条线路能否加载首页列表。需要换线路时，点线路名称手动切换。
-        </div>
+        </div>}
       </div>
     </div>
   );
 
+  if (isIos) return <Sheet open={open} onClose={onClose} fullPage="线路" sharedChrome z="z-[32]">{body}</Sheet>;
   return isMobile
     ? <Sheet open={open} onClose={onClose} label="切换线路">{body}</Sheet>
     : <Modal open={open} onClose={onClose} width={460}>{body}</Modal>;

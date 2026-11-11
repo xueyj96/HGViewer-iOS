@@ -1,0 +1,1999 @@
+{
+  "schema_version": 1,
+  "app": "HGViewer/HGhub iOS",
+  "as_of": "2026-11-11",
+  "source_version": "1.1.101",
+  "document_state": "selected and implemented; final production frontend regression and native build verified; delivery tracked separately",
+  "scope": "all page entrypoints and shared UI families; iPhone standards, desktop family kept separately",
+  "count_semantics": "records count control families, not rendered instances; file counts are coverage inventory only",
+  "source_files": [
+    {
+      "path": "src/App.tsx",
+      "sha256": "088b81833395dca98cc632fc5b6e645b82060b32d1feff1c1e3d1e7a1e8e23f8"
+    },
+    {
+      "path": "src/components/AccountCard.tsx",
+      "sha256": "3f8a60fefb0ade25a51e2a5c5a0680b5053a6301a8a9e1c5a45f6b4c4d1b596b"
+    },
+    {
+      "path": "src/components/CachePageFrame.tsx",
+      "sha256": "b286a4ea5378473cce403e41f64d42d0afa620f665bfcb565d07670eb54b9063"
+    },
+    {
+      "path": "src/components/CoverActionMenu.tsx",
+      "sha256": "f0e25052ea77d579087292c450701261a4792eb8ae1a8a93df73fc0503425480"
+    },
+    {
+      "path": "src/components/DesktopChrome.tsx",
+      "sha256": "e6d0151f2837cb445a7512fba6ae20bfec34a613b436b064b8f3103a98a079c6"
+    },
+    {
+      "path": "src/components/DownloadControls.tsx",
+      "sha256": "8b3c4f3f2736cc793d23bf3a445d5d31e30002d45c634a57ca47748b8724d352"
+    },
+    {
+      "path": "src/components/Feed.tsx",
+      "sha256": "819204990f16aedf5e09ae53a2f188d22f403956b057c45dac27ff107c7f60fe"
+    },
+    {
+      "path": "src/components/IOSChannelBackFrame.tsx",
+      "sha256": "aa59edcc8ea44ce1bd9c0ebfadf0b69cef986e6b20202d7097373b36e2bb43af"
+    },
+    {
+      "path": "src/components/IOSCoverMenu.ts",
+      "sha256": "910b62ae35d0c59a480c7425333671ffa6949db765a9e1365ca8ac9cd1c82a9b"
+    },
+    {
+      "path": "src/components/IOSNavigation.tsx",
+      "sha256": "850f815ed894f6db983e3e38b97db2602a856953f2e1ea25f53336a210eff951"
+    },
+    {
+      "path": "src/components/IOSPageBar.tsx",
+      "sha256": "48c7ba2313fa3546be67ce7369585d659c9b2499ac227e761367c066a31e96f9"
+    },
+    {
+      "path": "src/components/IOSRotateButton.tsx",
+      "sha256": "a0f7bad90a6f52853e0568e058294104af2c8b891fdba960f63d3316c450d894"
+    },
+    {
+      "path": "src/components/IOSSymbol.tsx",
+      "sha256": "73e3890cba02bf1689974d173c78fd9f4547028f277e202977f832cdd766c7f6"
+    },
+    {
+      "path": "src/components/IOSVideoSurface.tsx",
+      "sha256": "09fc63e24ea600ca0c81fae5cd4a069359a47f02d0bf2858051f8d5f47970d92"
+    },
+    {
+      "path": "src/components/LinePicker.tsx",
+      "sha256": "5455587b8d557440d929919206845f594befc3ad5ddc6a8c96e5b49b718113ed"
+    },
+    {
+      "path": "src/components/LoginModal.tsx",
+      "sha256": "2d09de1c54af79fc4546742be30ba034006107f5fcb1236db21839360076f3a7"
+    },
+    {
+      "path": "src/components/Panels.tsx",
+      "sha256": "618ad7472fd342470044224ea8724066aa83fccab89d75c37f7f0335ee69ef1f"
+    },
+    {
+      "path": "src/components/PlaybackQuality.tsx",
+      "sha256": "9e47b8d419deb25c7c4b15a318e2e62adc72d81d39718f7740417d07ca5733d6"
+    },
+    {
+      "path": "src/components/PlaybackSidebarSettings.tsx",
+      "sha256": "3b19164fc4d5693962825c4755c259513fc8790d0bc0a8bd205391990b3f8c81"
+    },
+    {
+      "path": "src/components/Player.tsx",
+      "sha256": "88b3dbdc4f7385836555410b20bb23c503364e9a60ca053a3c954a8575f3e81f"
+    },
+    {
+      "path": "src/components/PlayerControls.tsx",
+      "sha256": "dbd9043e28cdc9cce2deaa059df207b5aeb1abedd0518c8121917553b3b01975"
+    },
+    {
+      "path": "src/components/ResizeHandles.tsx",
+      "sha256": "4274964a9fc061da839db9f2c1390cc3dc082b79fbfaa0fa73e67bde810443b0"
+    },
+    {
+      "path": "src/components/ShowCoverGrid.tsx",
+      "sha256": "235c919bb43180829fd79ce50c3b4a0956f9369a276d30cab17049c67312e84b"
+    },
+    {
+      "path": "src/components/VideoSurface.tsx",
+      "sha256": "c82267ffda6e5e12b794a513ef090a9732660a2a7a10bd371f1c84703f53d72c"
+    },
+    {
+      "path": "src/components/cards.tsx",
+      "sha256": "16495046d47a41f7da336673f7c00ad835d0deaf9c1603430fbb0b8c1e24d380"
+    },
+    {
+      "path": "src/components/ui.tsx",
+      "sha256": "c96f2391426454201529a86180f91511e8505d82bc6974bbb13688dc1718e0b7"
+    },
+    {
+      "path": "src/components/useIOSKeyboardViewport.ts",
+      "sha256": "3fefed842db307ac632259a8b8f3a913619aeff4001b9d21d5df7147884cb8a3"
+    },
+    {
+      "path": "src/index.css",
+      "sha256": "c351c133725abd6ce9cc216f0639b34f00f9dca66a90ed812d0becea882f9cdc"
+    },
+    {
+      "path": "src/ios.css",
+      "sha256": "6c22a51ac52d93a7a1c3234868c71307658332d1e030d2ccfdb1d1689752e765"
+    },
+    {
+      "path": "src/pages/Category.tsx",
+      "sha256": "d43640f1d8c5fb33b3460405b3ba4ce1c372c4455ecb99186f374a0638f32b5c"
+    },
+    {
+      "path": "src/pages/Home.tsx",
+      "sha256": "e164101851d918d74ab2c57d9a8be20c4c545a6defb4099b687497ca2bd1823f"
+    },
+    {
+      "path": "src/pages/Offline.tsx",
+      "sha256": "df9e03440ecfd1cabafd02ad1b79c9ba830870c41779871a68d3d7488d53df80"
+    },
+    {
+      "path": "src/pages/Posts.tsx",
+      "sha256": "82d324a334afed08182aab9462bf8615ba6cc76e4eea333beb73a3ac742424ab"
+    },
+    {
+      "path": "src/pages/Profile.tsx",
+      "sha256": "e7a73cba2f4a595690cfe5df9221b55e897364295d67ae6789273e0354bb5e15"
+    },
+    {
+      "path": "src/pages/RecentCache.tsx",
+      "sha256": "d2497c2b3fbe5bde87de39ad99c22f16147c06b30d8c9a218396c6b845b275db"
+    },
+    {
+      "path": "src/pages/Search.tsx",
+      "sha256": "ccba320fe1fc0dda19082e0995b9823f6f1821b472d6596248364480bbb7fcfe"
+    },
+    {
+      "path": "src/pages/Settings.tsx",
+      "sha256": "7e81e6eda752aa68a98f66b065599536fad0825d6384455813f1c2f6462e48b7"
+    },
+    {
+      "path": "src/workspaceTabs.ts",
+      "sha256": "b7253baf240aed0655a57919b8a8225c928f488506bd5c4dafe7bd15722d03fb"
+    },
+    {
+      "path": "src-tauri/build.rs",
+      "sha256": "e993f988595d1ff0589808550a510343b3e17cd13dddf7762de472c2d7c2bdf0"
+    },
+    {
+      "path": "src-tauri/src/lib.rs",
+      "sha256": "b95c493cb637ca1ea99704ebe0d92a8af1e41727bec4dd4e82054f93a524e7f9"
+    }
+  ],
+  "cross_app_policy": "share taxonomy/evidence fields only; each app owns its numbers; no message sent to other sessions",
+  "records": [
+    {
+      "id": "navigation_shell",
+      "category": "页面壳",
+      "shared_implementation": "App/IOSNavigation/IOSPageBar",
+      "used_by": [
+        "全部iOS页面"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/ios.css:26",
+        "src/ios.css:43",
+        "src/components/IOSPageBar.tsx:45"
+      ],
+      "exceptions": "安全区动态加入，媒体保持整屏舞台",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "44点击、36可见、R8；页边16；框内4",
+      "current": "44点击/36可见/R8；页边16，组内4，单一安全区与导航reserve",
+      "selected_standard": "44点击/36可见/R8；页边16，组内4，单一安全区与导航reserve"
+    },
+    {
+      "id": "header_icons",
+      "category": "图标动作",
+      "shared_implementation": "IOSBackButton/IOSCloseButton/IOSPageBar",
+      "used_by": [
+        "全部顶栏"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/ios.css:378",
+        "src/ios.css:387"
+      ],
+      "exceptions": "特殊图标做光学校正",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": "36x36",
+        "hit_target": "44x44",
+        "glyph": "16/20",
+        "typography": null,
+        "spacing": "inset4",
+        "radius": "R8"
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "44×44点击、36×36可见；返回16图标，账户/榜单20",
+      "current": "44×44点击/36×36可见，普通图标16/账户20，R8",
+      "selected_standard": "44×44点击/36×36可见，普通图标16/账户20，R8",
+      "baseline_runtime_measurements": [
+        {
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": {
+            "buttons": [
+              {
+                "label": "返回",
+                "w": 44,
+                "h": 44
+              },
+              {
+                "label": "登录",
+                "w": 133,
+                "h": 44
+              },
+              {
+                "label": "注册",
+                "w": 133,
+                "h": 44
+              },
+              {
+                "label": "提交登录",
+                "w": 44,
+                "h": 44
+              }
+            ],
+            "panelFaceHeight": 36
+          }
+        },
+        {
+          "viewport": {
+            "width": 844,
+            "height": 390
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": {
+            "buttons": [
+              {
+                "label": "返回",
+                "w": 44,
+                "h": 44
+              },
+              {
+                "label": "登录",
+                "w": 360,
+                "h": 44
+              },
+              {
+                "label": "注册",
+                "w": 360,
+                "h": 44
+              },
+              {
+                "label": "提交登录",
+                "w": 44,
+                "h": 44
+              }
+            ],
+            "panelFaceHeight": 36
+          }
+        }
+      ]
+    },
+    {
+      "id": "tabbar",
+      "category": "底栏",
+      "shared_implementation": "TabBar",
+      "used_by": [
+        "全部主入口和共享整页"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/ios.css:75",
+        "src/ios.css:117",
+        "src/App.tsx:42"
+      ],
+      "exceptions": "横屏保持全安全区宽度",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "44点击高、36可见高；图标14、文字12",
+      "current": "44点击/36可见，图标14、文字12；底部安全区后可见留白8",
+      "selected_standard": "44点击/36可见，图标14、文字12；底部安全区后可见留白8"
+    },
+    {
+      "id": "navigation_budget",
+      "category": "内容留白",
+      "shared_implementation": "App/ios.css",
+      "used_by": [
+        "浏览、播放、评论、缓存"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/ios.css:43",
+        "src/ios.css:189",
+        "src/App.tsx:207",
+        "src/components/Feed.tsx:1119"
+      ],
+      "exceptions": "这属于计算来源差异，未据静态源码认定已遮挡",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "CSS reserve=safe+52，播放器传bottomInset50；顶部/底部可见边距不同",
+      "current": "reserve=导航bottom+44+8；clearance=reserve-sab；Feed统一引用CSS预算，字幕与侧栏不再各算50",
+      "selected_standard": "reserve=导航bottom+44+8；clearance=reserve-sab；Feed统一引用CSS预算，字幕与侧栏不再各算50"
+    },
+    {
+      "id": "landscape_columns",
+      "category": "横屏容器",
+      "shared_implementation": "useWorkspaceWidth/Masonry/ShowCoverGrid",
+      "used_by": [
+        "全部页面"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/App.tsx:137",
+        "src/components/cards.tsx:40",
+        "src/components/ShowCoverGrid.tsx:7"
+      ],
+      "exceptions": "固定顶底栏继续占满安全区；媒体不套文字最大宽",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "wide取clientWidth>640；正文无max-width",
+      "current": "wide按容器宽减native safe左右与32页边后判断>640；网格2/3列；长文内阅读列max640",
+      "selected_standard": "wide按容器宽减native safe左右与32页边后判断>640；网格2/3列；长文内阅读列max640"
+    },
+    {
+      "id": "playback_rail",
+      "category": "侧栏",
+      "shared_implementation": "useIOSPlaybackRail/Feed",
+      "used_by": [
+        "在线、缓存、图文播放"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/ios.css:1024",
+        "src/ios.css:1040",
+        "src/ios.css:1371"
+      ],
+      "exceptions": "76防零安全区不能直接删除；原生方向需要真机核验",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "每列44，矮横屏2/3列，局部间隙2，安全区延迟时保底76",
+      "current": "列44/间4；按可用高度与按钮数算1–3列并内部滚动；左右刘海与76兜底保留",
+      "selected_standard": "列44/间4；按可用高度与按钮数算1–3列并内部滚动；左右刘海与76兜底保留"
+    },
+    {
+      "id": "segments",
+      "category": "分段栏",
+      "shared_implementation": "hg-ios-segments",
+      "used_by": [
+        "账号、分类、榜单、资料库、显示模式、详情选集"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/ios.css:457",
+        "src/ios.css:491"
+      ],
+      "exceptions": "不同数字属于嵌套层次，不是冲突",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "44点击/36组框/28选中面；13字号；4间隙",
+      "current": "44点击/36组框/28选中；13字、间4，顶栏等宽动作位",
+      "selected_standard": "44点击/36组框/28选中；13字、间4，顶栏等宽动作位",
+      "baseline_runtime_measurements": [
+        {
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": [
+            {
+              "w": 110.65625,
+              "h": 44,
+              "radius": "4px",
+              "font": "13px"
+            },
+            {
+              "w": 110.671875,
+              "h": 44,
+              "radius": "4px",
+              "font": "13px"
+            },
+            {
+              "w": 110.671875,
+              "h": 44,
+              "radius": "4px",
+              "font": "13px"
+            }
+          ]
+        },
+        {
+          "viewport": {
+            "width": 844,
+            "height": 390
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": [
+            {
+              "w": 262,
+              "h": 44,
+              "radius": "4px",
+              "font": "13px"
+            },
+            {
+              "w": 262,
+              "h": 44,
+              "radius": "4px",
+              "font": "13px"
+            },
+            {
+              "w": 262,
+              "h": 44,
+              "radius": "4px",
+              "font": "13px"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "text_actions",
+      "category": "文字按钮",
+      "shared_implementation": "CompactAction/ActionDialog/各局部按钮",
+      "used_by": [
+        "全部"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/ui.tsx:8",
+        "src/components/ui.tsx:65"
+      ],
+      "exceptions": "不把所有文字动作固定88",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "44顶栏、88确认、内容自适应文字按钮并存",
+      "current": "主操作44点击/36可见，短顶栏动作44方，确认88宽；文字动作按角色自适应",
+      "selected_standard": "主操作44点击/36可见，短顶栏动作44方，确认88宽；文字动作按角色自适应"
+    },
+    {
+      "id": "compact_actions",
+      "category": "紧凑辅助动作",
+      "shared_implementation": "CompactAction",
+      "used_by": [
+        "线路检测、重试、缓存、恢复默认"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/ui.tsx:15",
+        "src/ios.css:184",
+        "src/ios.css:1116"
+      ],
+      "exceptions": "只用于卡内辅助动作，不用于主提交",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": "28 high",
+        "hit_target": "min44x44",
+        "glyph": null,
+        "typography": "11/16",
+        "spacing": "x10/gap4",
+        "radius": "R4"
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "44点击高/min宽44，28可见、水平10、11字号、R4",
+      "current": "44点击/min宽44、可见28、11/16、横10、图文4、R4",
+      "selected_standard": "44点击/min宽44、可见28、11/16、横10、图文4、R4",
+      "baseline_runtime_measurements": [
+        {
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": {
+            "rowHeight": 53,
+            "buttonHeight": 44,
+            "faceHeight": 28,
+            "faceRadius": "4px"
+          }
+        },
+        {
+          "viewport": {
+            "width": 844,
+            "height": 390
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": {
+            "rowHeight": 53,
+            "buttonHeight": 44,
+            "faceHeight": 28,
+            "faceRadius": "4px"
+          }
+        }
+      ]
+    },
+    {
+      "id": "search_tags",
+      "category": "可点击标签",
+      "shared_implementation": "Search/ios search CSS",
+      "used_by": [
+        "最近搜索、热门题材"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/ios.css:1157",
+        "src/ios.css:1209"
+      ],
+      "exceptions": "过去用户已要求调矮，避免未经确认回增高度",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": "28 high",
+        "hit_target": "min44x44",
+        "glyph": null,
+        "typography": "12/16",
+        "spacing": "x8/gap4",
+        "radius": "R4"
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "26可见/44点击，12字号、水平9、R4",
+      "current": "可见28/点击44、字号12、横8、同行4、R4；原26已按本轮用户决定合并",
+      "selected_standard": "可见28/点击44、字号12、横8、同行4、R4；原26已按本轮用户决定合并"
+    },
+    {
+      "id": "inputs",
+      "category": "输入框",
+      "shared_implementation": "hg-ios-input/原生input",
+      "used_by": [
+        "账号、搜索、评论"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/LoginModal.tsx:70",
+        "src/ios.css:843",
+        "src/index.css:535"
+      ],
+      "exceptions": "完整输入框可见44是表单档，不要求缩36",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": "min44 high",
+        "hit_target": "min44 high",
+        "glyph": null,
+        "typography": "16/24",
+        "spacing": "x12/gap8",
+        "radius": "R4"
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "最终min44、字号16、R4；登录水平14/字段gap10",
+      "current": "min44、16/24、横12、字段间8、R4；错误12/16可换行",
+      "selected_standard": "min44、16/24、横12、字段间8、R4；错误12/16可换行",
+      "baseline_runtime_measurements": [
+        {
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": {
+            "inputs": [
+              {
+                "w": 340,
+                "h": 44,
+                "radius": "4px",
+                "font": "16px"
+              },
+              {
+                "w": 340,
+                "h": 44,
+                "radius": "4px",
+                "font": "16px"
+              }
+            ],
+            "gap": "10px"
+          }
+        },
+        {
+          "viewport": {
+            "width": 844,
+            "height": 390
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": {
+            "inputs": [
+              {
+                "w": 794,
+                "h": 44,
+                "radius": "4px",
+                "font": "16px"
+              },
+              {
+                "w": 794,
+                "h": 44,
+                "radius": "4px",
+                "font": "16px"
+              }
+            ],
+            "gap": "10px"
+          }
+        }
+      ]
+    },
+    {
+      "id": "comment_composer",
+      "category": "评论输入",
+      "shared_implementation": "CommentsPanel",
+      "used_by": [
+        "评论页"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/Panels.tsx:199",
+        "src/components/Panels.tsx:213"
+      ],
+      "exceptions": "不能把非iOS h9当iOS缺陷",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "iOS输入44、发送44、头像30；非iOS36",
+      "current": "输入44、发送44、头像32，按钮加载16；非iOS保留原布局",
+      "selected_standard": "输入44、发送44、头像32，按钮加载16；非iOS保留原布局"
+    },
+    {
+      "id": "selectors",
+      "category": "数量选择器",
+      "shared_implementation": "DownloadSettingRow",
+      "used_by": [
+        "下载设置"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/pages/Settings.tsx:18",
+        "src/ios.css:1"
+      ],
+      "exceptions": "原生picker展开由系统负责",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "67×44当前渲染、R4、14字；整块背景44",
+      "current": "原select和4项onChange保留；44入口；支持base-select时popupR8/内4/行44/横12/字14/20/min宽128",
+      "selected_standard": "原select和4项onChange保留；44入口；支持base-select时popupR8/内4/行44/横12/字14/20/min宽128",
+      "baseline_runtime_measurements": [
+        {
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": [
+            {
+              "w": 67,
+              "h": 44,
+              "radius": "4px",
+              "font": "14px"
+            },
+            {
+              "w": 67,
+              "h": 44,
+              "radius": "4px",
+              "font": "14px"
+            }
+          ]
+        },
+        {
+          "viewport": {
+            "width": 844,
+            "height": 390
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": [
+            {
+              "w": 67,
+              "h": 44,
+              "radius": "4px",
+              "font": "14px"
+            },
+            {
+              "w": 67,
+              "h": 44,
+              "radius": "4px",
+              "font": "14px"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "switches",
+      "category": "开关",
+      "shared_implementation": "Toggle",
+      "used_by": [
+        "设置、播放侧栏配置"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/ios.css:623",
+        "src/ios.css:657"
+      ],
+      "exceptions": "圆胶囊是开关形态，不套按钮R4",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": "40x24",
+        "hit_target": "pseudo expanded44x44",
+        "glyph": "thumb20",
+        "typography": null,
+        "spacing": null,
+        "radius": "pill"
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "普通51×31，紧凑40×24；伪元素补44点击区",
+      "current": "所有iOS开关40×24/拇指20，伪元素补44×44操作区；无51×31分档",
+      "selected_standard": "所有iOS开关40×24/拇指20，伪元素补44×44操作区；无51×31分档",
+      "baseline_runtime_measurements": [
+        {
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": [
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 51,
+              "h": 31,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-6.5px",
+                "bottom": "-6.5px"
+              }
+            },
+            {
+              "w": 51,
+              "h": 31,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-6.5px",
+                "bottom": "-6.5px"
+              }
+            }
+          ]
+        },
+        {
+          "viewport": {
+            "width": 844,
+            "height": 390
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": [
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-10px",
+                "bottom": "-10px"
+              }
+            },
+            {
+              "w": 51,
+              "h": 31,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-6.5px",
+                "bottom": "-6.5px"
+              }
+            },
+            {
+              "w": 51,
+              "h": 31,
+              "radius": "3.35544e+07px",
+              "font": "16px",
+              "touchBefore": {
+                "top": "-6.5px",
+                "bottom": "-6.5px"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "list_rows",
+      "category": "列表与设置行",
+      "shared_implementation": "Section/DownloadSettingRow/Row",
+      "used_by": [
+        "分类、设置、线路、最近缓存"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/ios.css:550",
+        "src/ios.css:1120",
+        "src/ios.css:1233",
+        "src/pages/Settings.tsx:23"
+      ],
+      "exceptions": "44为控件点击区，不是所有内容行高",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "分类min52；设置min54，账号min66；双行实际约59–69",
+      "current": "单行min52、双行/设置/线路min60；横12/组内8；说明可换行增高",
+      "selected_standard": "单行min52、双行/设置/线路min60；横12/组内8；说明可换行增高",
+      "baseline_runtime_measurements": [
+        {
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": [
+            62.5,
+            92,
+            59.5,
+            69,
+            68,
+            58.5
+          ]
+        },
+        {
+          "viewport": {
+            "width": 844,
+            "height": 390
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": [
+            62.5,
+            92,
+            59.5,
+            69,
+            68,
+            58.5
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sidebar_editor",
+      "category": "可排序设置行",
+      "shared_implementation": "PlaybackSidebarSettings",
+      "used_by": [
+        "播放侧栏设置"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/PlaybackSidebarSettings.tsx:103",
+        "src/ios.css:599"
+      ],
+      "exceptions": "与双行设置行不同类型",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "行44，拖柄44，行间4，恢复默认44/28",
+      "current": "compact行44、拖柄44、开关40×24、组内4、R4；恢复默认44/28",
+      "selected_standard": "compact行44、拖柄44、开关40×24、组内4、R4；恢复默认44/28",
+      "baseline_runtime_measurements": [
+        {
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": {
+            "summary": {
+              "w": 356,
+              "h": 48,
+              "radius": "0px",
+              "font": "14px"
+            },
+            "row": {
+              "w": 348,
+              "h": 44,
+              "radius": "4px",
+              "font": "16px"
+            },
+            "switch": {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px"
+            },
+            "handle": {
+              "w": 44,
+              "h": 44,
+              "radius": "0px",
+              "font": "16px"
+            },
+            "reset": {
+              "w": 64,
+              "h": 44,
+              "radius": "0px",
+              "font": "16px"
+            },
+            "resetFace": {
+              "w": 64,
+              "h": 28,
+              "radius": "4px",
+              "font": "11px"
+            },
+            "rowGap": "4px"
+          }
+        },
+        {
+          "viewport": {
+            "width": 844,
+            "height": 390
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": {
+            "summary": {
+              "w": 810,
+              "h": 48,
+              "radius": "0px",
+              "font": "14px"
+            },
+            "row": {
+              "w": 802,
+              "h": 44,
+              "radius": "4px",
+              "font": "16px"
+            },
+            "switch": {
+              "w": 40,
+              "h": 24,
+              "radius": "3.35544e+07px",
+              "font": "16px"
+            },
+            "handle": {
+              "w": 44,
+              "h": 44,
+              "radius": "0px",
+              "font": "16px"
+            },
+            "reset": {
+              "w": 64,
+              "h": 44,
+              "radius": "0px",
+              "font": "16px"
+            },
+            "resetFace": {
+              "w": 64,
+              "h": 28,
+              "radius": "4px",
+              "font": "11px"
+            },
+            "rowGap": "4px"
+          }
+        }
+      ]
+    },
+    {
+      "id": "episode_grid",
+      "category": "选集按钮与网格",
+      "shared_implementation": "EpisodePanel/Offline",
+      "used_by": [
+        "在线选集、已缓存分集、下载管理"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/Panels.tsx:52",
+        "src/ios.css:833",
+        "src/pages/Offline.tsx:298"
+      ],
+      "exceptions": "可见底色44属内容选项档，不套一般36",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "4列/3列、44最小高、4间隙、4内边、R4",
+      "current": "min44高、R4、内4/间4；在线4列与下载管理3列保留为任务差异",
+      "selected_standard": "min44高、R4、内4/间4；在线4列与下载管理3列保留为任务差异"
+    },
+    {
+      "id": "quality_menu",
+      "category": "自定义菜单",
+      "shared_implementation": "QualitySheet",
+      "used_by": [
+        "播放清晰度"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/PlaybackQuality.tsx:60"
+      ],
+      "exceptions": "系统菜单不使用该网页尺寸",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "行min44、横12、字号14、勾16，max38vh",
+      "current": "44行/横12/字14/20/R8；max高按视口与6行预算，短视口保留一行/关闭",
+      "selected_standard": "44行/横12/字14/20/R8；max高按视口与6行预算，短视口保留一行/关闭"
+    },
+    {
+      "id": "native_context_menu",
+      "category": "封面操作菜单",
+      "shared_implementation": "UIContextMenuInteraction/UIMenu",
+      "used_by": [
+        "封面长按"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/IOSCoverMenu.ts:1",
+        "src/components/CoverActionMenu.tsx:1",
+        "src/App.tsx:1"
+      ],
+      "exceptions": "以简洁Web动作列表替代UIKit预览；Popover API不可用时使用同一DOM回退",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": "popup content width /rows44",
+        "hit_target": "rows44",
+        "glyph": null,
+        "typography": "14/20",
+        "spacing": "inset4/x12",
+        "radius": "R8/R4"
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "UIKit管理行高/宽/字体",
+      "current": "已换CoverActionMenu Web popover/回退DOM，R8/内4/行44/字14/20；原native桥和注册已删除",
+      "selected_standard": "已换CoverActionMenu Web popover/回退DOM，R8/内4/行44/字14/20；原native桥和注册已删除"
+    },
+    {
+      "id": "confirm_dialog",
+      "category": "确认弹窗",
+      "shared_implementation": "ActionDialog/ConfirmAction",
+      "used_by": [
+        "清空历史、清理/删除缓存"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/ui.tsx:1",
+        "src/ios.css:1"
+      ],
+      "exceptions": "只对确认文案限60字",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": "max320x180, 288 wide at320 viewport; button88x36",
+        "hit_target": "button88x44",
+        "glyph": null,
+        "typography": "13/20",
+        "spacing": "16 inset",
+        "radius": "R12/R4"
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "320×180/R12/内16；正文60高；按钮88×44/36，标题16字/正文60字/标签4字",
+      "current": "max320×180；左右至少16，320视口宽288；内16，按钮88×44点击/88×36可见；短文案限制保留",
+      "selected_standard": "max320×180；左右至少16，320视口宽288；内16，按钮88×44点击/88×36可见；短文案限制保留"
+    },
+    {
+      "id": "diagnosis_dialog",
+      "category": "滚动结果弹窗",
+      "shared_implementation": "ActionDialog",
+      "used_by": [
+        "网络诊断"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/pages/Settings.tsx:282"
+      ],
+      "exceptions": "诊断全文不按确认文案60字截断",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "320×180，正文60高完整滚动，退出/复制",
+      "current": "同确认外框max320×180/页边16；正文60高完整滚动；退出/复制，失败可退出",
+      "selected_standard": "同确认外框max320×180/页边16；正文60高完整滚动；退出/复制，失败可退出"
+    },
+    {
+      "id": "content_modal",
+      "category": "内容弹窗",
+      "shared_implementation": "Modal",
+      "used_by": [
+        "关于、非iOS更新提示"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/pages/Settings.tsx:1",
+        "src/ios.css:1"
+      ],
+      "exceptions": "布局选择待确认；更新入口当前非iOS",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "关于preferred392、内20、内容自适应、底按钮44全可见",
+      "current": "iOS关于为共享顶底栏整页，内容分卡，顶部复制/返回；非iOS保留原Modal",
+      "selected_standard": "iOS关于为共享顶底栏整页，内容分卡，顶部复制/返回；非iOS保留原Modal",
+      "baseline_runtime_measurements": [
+        {
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": {
+            "window": {
+              "w": 341.919677734375,
+              "h": 434.5229187011719
+            },
+            "buttons": [
+              {
+                "text": "github.com/Minireel/HGhub复制",
+                "w": 301.9290771484375,
+                "h": 43.989654541015625
+              },
+              {
+                "text": "huangguoai.com复制",
+                "w": 301.9290771484375,
+                "h": 43.98968505859375
+              },
+              {
+                "text": "知道了",
+                "w": 301.9290771484375,
+                "h": 43.9896240234375
+              }
+            ]
+          }
+        },
+        {
+          "viewport": {
+            "width": 844,
+            "height": 390
+          },
+          "method": "Chrome with mocked native bridge; CSS px, not device point measurements",
+          "result": {
+            "window": {
+              "w": 391.9974365234375,
+              "h": 355.9976806640625
+            },
+            "buttons": [
+              {
+                "text": "github.com/Minireel/HGhub复制",
+                "w": 351.9977111816406,
+                "h": 43.99971008300781
+              },
+              {
+                "text": "huangguoai.com复制",
+                "w": 351.9977111816406,
+                "h": 43.999725341796875
+              },
+              {
+                "text": "知道了",
+                "w": 351.9977111816406,
+                "h": 43.999725341796875
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sheets",
+      "category": "半屏/整页/键盘",
+      "shared_implementation": "Sheet/useIOSKeyboardViewport",
+      "used_by": [
+        "清晰度、详情、评论、线路、账号"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/ui.tsx:1",
+        "src/components/PlaybackQuality.tsx:1",
+        "src/components/useIOSKeyboardViewport.ts:1"
+      ],
+      "exceptions": "不同任务不必同高，阈值仅兜底而非设备身份",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "iOS清晰度38vh、图文正文78vh；评论/详情/账号/线路采用整页；72/74vh仅非iOS；键盘阈值200/150",
+      "current": "iOS评论/详情/账号/线路/关于整页；清晰度半屏可用高度预算；键盘紧凑时整表单滚动",
+      "selected_standard": "iOS评论/详情/账号/线路/关于整页；清晰度半屏可用高度预算；键盘紧凑时整表单滚动"
+    },
+    {
+      "id": "cards",
+      "category": "内容卡片",
+      "shared_implementation": "hg-ios-content-card/grouped-list",
+      "used_by": [
+        "详情、评论、搜索、缓存、设置"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/ios.css:1193",
+        "src/ios.css:1104",
+        "src/pages/RecentCache.tsx:31"
+      ],
+      "exceptions": "按最终边线累计padding，不能只看父容器3.5",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "通用内8，设置行横12，缓存格容器约3.5+子内容，组间8/12并存",
+      "current": "普通信息内8、长文12、操作/网格4；同级卡组间8；最近缓存已3→2(space-y)",
+      "selected_standard": "普通信息内8、长文12、操作/网格4；同级卡组间8；最近缓存已3→2(space-y)"
+    },
+    {
+      "id": "posters",
+      "category": "剧集封面",
+      "shared_implementation": "ShowCoverCard/WaterfallCard/RankRow",
+      "used_by": [
+        "搜索、频道、榜单、收藏、历史、离线、详情"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/ShowCoverGrid.tsx:24",
+        "src/components/cards.tsx:10",
+        "src/components/cards.tsx:80",
+        "src/ios.css:783"
+      ],
+      "exceptions": "网格卡片宽自适应；不固定所有卡片高度",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "3:4/1:1.32；榜单52×68，详情64宽；网格gap8",
+      "current": "iOS剧集3:4，详情64宽、榜单48×64；网格间8；标题12/16最多2行",
+      "selected_standard": "iOS剧集3:4，详情64宽、榜单48×64；网格间8；标题12/16最多2行"
+    },
+    {
+      "id": "article_previews",
+      "category": "图文媒体",
+      "shared_implementation": "Posts/Player",
+      "used_by": [
+        "图文列表和详情"
+      ],
+      "standard_status": "defined_platform_or_validation_exception",
+      "sources": [
+        "src/pages/Posts.tsx:86",
+        "src/index.css:537"
+      ],
+      "exceptions": "不要把所有媒体裁成剧集3:4",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "列表1:1.28；嵌入视频有viewport max；原图自然比",
+      "current": "图文列表1:1.28保留；正文/全屏原比例与容器高度预算",
+      "selected_standard": "图文列表1:1.28保留；正文/全屏原比例与容器高度预算"
+    },
+    {
+      "id": "avatars",
+      "category": "头像",
+      "shared_implementation": "Avatar",
+      "used_by": [
+        "评论、账号、作者、桌面账号"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/ui.tsx:1",
+        "src/components/Panels.tsx:1",
+        "src/components/Feed.tsx:1"
+      ],
+      "exceptions": "桌面34不直接视为iOS冲突",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "30/32/34/40等分散；iOS评论32、作者34、账号32",
+      "current": "iOS常规32；输入30/作者34已合并32；默认Avatar iOS32/非iOS40",
+      "selected_standard": "iOS常规32；输入30/作者34已合并32；默认Avatar iOS32/非iOS40"
+    },
+    {
+      "id": "badges",
+      "category": "徽标与非交互标签",
+      "shared_implementation": "ShowCoverCard/cards/Badge",
+      "used_by": [
+        "封面、图文、编号"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/ShowCoverGrid.tsx:29",
+        "src/components/cards.tsx:17"
+      ],
+      "exceptions": "非交互状态不必44点击；8.5横卡属于非iOS分支",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "8.5/9/9.5/10.5/11等字号散落，状态徽标与图文标签未按角色登记；8.5横卡仅非iOS",
+      "current": "iOS内容徽标10/14、横6竖2/R4，封面元信息11/16",
+      "selected_standard": "iOS内容徽标10/14、横6竖2/R4，封面元信息11/16"
+    },
+    {
+      "id": "typography",
+      "category": "字阶行高",
+      "shared_implementation": "index.css/ios.css/各内容组件",
+      "used_by": [
+        "全部文字"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/index.css:497",
+        "src/index.css:535",
+        "src/pages/Posts.tsx:448",
+        "src/components/Feed.tsx:1398"
+      ],
+      "exceptions": "同用途HTML/纯文共享角色；允许明确的大标题例外",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "导航13、底栏12、表单最终16已知；封面10.5/11.5，正文HTML13/1.85、纯文12.5/relaxed",
+      "current": "导航13/20、封面12/16、详情16/24、正文14/20、阅读14/22、输入16/24、元信息11/16；HTML/纯文共用article-body",
+      "selected_standard": "导航13/20、封面12/16、详情16/24、正文14/20、阅读14/22、输入16/24、元信息11/16；HTML/纯文共用article-body"
+    },
+    {
+      "id": "icons",
+      "category": "图标字形",
+      "shared_implementation": "icons/IOSSymbol",
+      "used_by": [
+        "全部"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/ios.css:47",
+        "src/ios.css:117",
+        "src/ios.css:1147"
+      ],
+      "exceptions": "原生SF Symbol与SVG需实看，不能只对size",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "导航16、媒体/账户20、底栏14已定；内容9–24分散",
+      "current": "底栏14、普通16、媒体/账户20、说明24；列表底块32；glyph与点击区分别定义",
+      "selected_standard": "底栏14、普通16、媒体/账户20、说明24；列表底块32；glyph与点击区分别定义"
+    },
+    {
+      "id": "seek",
+      "category": "可拖动进度",
+      "shared_implementation": "Feed/Player",
+      "used_by": [
+        "普通/全屏/图文播放"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/Feed.tsx:1139",
+        "src/components/Feed.tsx:1242",
+        "src/index.css:173"
+      ],
+      "exceptions": "这是明确44基准未覆盖，不能仅加粗轨道",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": "track3/4",
+        "hit_target": "44 high",
+        "glyph": "thumb14",
+        "typography": null,
+        "spacing": null,
+        "radius": "pill"
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "Feed点击14/22，图文range20；轨道2.5/4",
+      "current": "Feed普通和全屏事件区44，图文range44；普通轨道3/图文4；full监听节点不受轨道规则影响",
+      "selected_standard": "Feed普通和全屏事件区44，图文range44；普通轨道3/图文4；full监听节点不受轨道规则影响"
+    },
+    {
+      "id": "progress_display",
+      "category": "非交互进度",
+      "shared_implementation": "DownloadTrack/RankRow/封面遮罩",
+      "used_by": [
+        "下载、排名、封面"
+      ],
+      "standard_status": "defined_platform_or_validation_exception",
+      "sources": [
+        "src/components/DownloadControls.tsx:63",
+        "src/components/cards.tsx:89"
+      ],
+      "exceptions": "纯显示无44点击要求",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "下载6、排名3、封面比例遮罩",
+      "current": "下载6/排名3保留为纯显示类型；封面进度百分比遮罩，独立数字角色",
+      "selected_standard": "下载6/排名3保留为纯显示类型；封面进度百分比遮罩，独立数字角色"
+    },
+    {
+      "id": "media_play_controls",
+      "category": "播放动作",
+      "shared_implementation": "Feed/Player/Posts",
+      "used_by": [
+        "沉浸、内嵌、全屏"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/Feed.tsx:1170",
+        "src/components/Feed.tsx:1265",
+        "src/components/Feed.tsx:1276",
+        "src/components/Player.tsx:151"
+      ],
+      "exceptions": "尺寸类别不同，不合并成一个大按钮",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "中心66/28、64/26、56/24；部分全屏播放36/倍速32点击",
+      "current": "iOS沉浸64/28、内嵌56/24；全屏操作44/36与速度解除44；非iOS保留原字号回退",
+      "selected_standard": "iOS沉浸64/28、内嵌56/24；全屏操作44/36与速度解除44；非iOS保留原字号回退"
+    },
+    {
+      "id": "empty_states",
+      "category": "空状态",
+      "shared_implementation": "EmptyStatus/Empty",
+      "used_by": [
+        "收藏、历史、缓存、评论等"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/ui.tsx:23",
+        "src/components/ui.tsx:247",
+        "src/components/Panels.tsx:187"
+      ],
+      "exceptions": "用户已明确不需要的引导不可因规范重新加回",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "普通列表纯文字空态；iOS评论PageStatus纯文字；非iOS评论Empty包含64图标与引导",
+      "current": "iOS收藏/历史/缓存纯文字空态14/20/上下32；不重加引导；评论PageStatus",
+      "selected_standard": "iOS收藏/历史/缓存纯文字空态14/20/上下32；不重加引导；评论PageStatus"
+    },
+    {
+      "id": "loading_states",
+      "category": "加载态",
+      "shared_implementation": "各页spinner/Img",
+      "used_by": [
+        "首页、列表、图片、按钮、媒体"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/ui.tsx:37",
+        "src/pages/Home.tsx:1",
+        "src/pages/Search.tsx:1",
+        "src/pages/Profile.tsx:1"
+      ],
+      "exceptions": "加载区高随容器，禁止固定全屏等高",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": "spinner32/24/16/36",
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": "initial32/tail16",
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "28/32/36 spinner与py16/40/48并存",
+      "current": "LoadingStatus内部spinner32/24/16/36方形；外容器负责首屏32/尾部16留白，移除父重复py",
+      "selected_standard": "LoadingStatus内部spinner32/24/16/36方形；外容器负责首屏32/尾部16留白，移除父重复py"
+    },
+    {
+      "id": "errors",
+      "category": "错误/重试",
+      "shared_implementation": "PageStatus/PlaybackError",
+      "used_by": [
+        "全部取数失败、设置保存等"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/ui.tsx:27",
+        "src/pages/Settings.tsx:64"
+      ],
+      "exceptions": "状态正确性问题单列，不以尺寸一致替代",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "卡内/居中媒体错误共存；下载设置失败仍undefined显示读取中",
+      "current": "PageStatus正文14/20、说明12/18、内12；下载设置失败显示明确错误+重试，不再停留读取中；保存中不加空大行",
+      "selected_standard": "PageStatus正文14/20、说明12/18、内12；下载设置失败显示明确错误+重试，不再停留读取中；保存中不加空大行"
+    },
+    {
+      "id": "toasts",
+      "category": "通知/撤销",
+      "shared_implementation": "ToastHost",
+      "used_by": [
+        "全局"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/ui.tsx:264",
+        "src/ios.css:535"
+      ],
+      "exceptions": "不能截断唯一错误说明",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "字单行truncate、底部96、padding14/16与10，动作高至少44(iOS覆盖)",
+      "current": "13/20、最多2行、内12×8/图文8、max360与视口约束；位置来自导航和visualViewport",
+      "selected_standard": "13/20、最多2行、内12×8/图文8、max360与视口约束；位置来自导航和visualViewport"
+    },
+    {
+      "id": "dividers_material",
+      "category": "边线圆角材质",
+      "shared_implementation": "CSS主题变量",
+      "used_by": [
+        "全部"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/ios.css:21",
+        "src/ios.css:299",
+        "src/ios.css:1097"
+      ],
+      "exceptions": "开关、轨道、头像保留圆形/胶囊",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "分隔0.5/1混用；R4/R8/R12已定，媒体半透明材质已有",
+      "current": "R4控件/R8卡片与菜单/R12确认；.5细边线，2焦点；媒体材质与普通卡分开",
+      "selected_standard": "R4控件/R8卡片与菜单/R12确认；.5细边线，2焦点；媒体材质与普通卡分开"
+    },
+    {
+      "id": "small_targets",
+      "category": "未覆盖动作",
+      "shared_implementation": "AccountCard/Search",
+      "used_by": [
+        "登录账号退出、搜索分页"
+      ],
+      "standard_status": "implemented",
+      "sources": [
+        "src/components/AccountCard.tsx:20",
+        "src/pages/Search.tsx:165"
+      ],
+      "exceptions": "仅活跃iOS分支列为问题",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "退出36²，加载更多36高",
+      "current": "账号退出44点击/36可见；搜索加载更多CompactAction44/28；进度与全屏操作44",
+      "selected_standard": "账号退出44点击/36可见；搜索加载更多CompactAction44/28；进度与全屏操作44"
+    },
+    {
+      "id": "desktop",
+      "category": "桌面分支",
+      "shared_implementation": "DesktopChrome/PlayerControls/index.css",
+      "used_by": [
+        "macOS/Windows"
+      ],
+      "standard_status": "defined_platform_or_validation_exception",
+      "sources": [
+        "src/components/DesktopChrome.tsx:15",
+        "src/index.css:181",
+        "src/components/PlayerControls.tsx:1"
+      ],
+      "exceptions": "本次没有桌面运行测量；提议数值未接受",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "鼠标导航、标题栏、窗口按钮独立样式，原生macOS红绿灯",
+      "current": "桌面标题栏44、工具34×30、窗口按钮44×30、侧栏236/72、导航行40；保留平台分支，不套iPhone44",
+      "selected_standard": "桌面标题栏44、工具34×30、窗口按钮44×30、侧栏236/72、导航行40；保留平台分支，不套iPhone44"
+    },
+    {
+      "id": "external_web",
+      "category": "官方网页/外部链接",
+      "shared_implementation": "api.openUrl/open_url",
+      "used_by": [
+        "关于/外部下载"
+      ],
+      "standard_status": "defined_platform_or_validation_exception",
+      "sources": [
+        "src/api.ts:165",
+        "src/pages/Settings.tsx:373"
+      ],
+      "exceptions": "原生系统/外站布局不作可控UI计数",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "当前审查入口走外部打开，没有独立App内官方网页页面模板",
+      "current": "外部链接仍系统打开，App入口使用本App控件；不接管站外网页尺寸",
+      "selected_standard": "外部链接仍系统打开，App入口使用本App控件；不接管站外网页尺寸"
+    },
+    {
+      "id": "accessibility_bounds",
+      "category": "缩放/长文/安全区",
+      "shared_implementation": "all layout owners",
+      "used_by": [
+        "全部"
+      ],
+      "standard_status": "defined_platform_or_validation_exception",
+      "sources": [
+        "src/components/useIOSHorizontalInsets.ts:1",
+        "src/components/useIOSKeyboardViewport.ts:1",
+        "src/ios.css:1371"
+      ],
+      "exceptions": "固定320×180确认仅适用当前短文案，扩大字体时策略仍需确认",
+      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "dimension_fields": {
+        "visible_frame": null,
+        "hit_target": null,
+        "glyph": null,
+        "typography": null,
+        "spacing": null,
+        "radius": null
+      },
+      "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
+      "baseline_current": "大字号/动态字号/双向旋转与键盘边界未全量实测",
+      "current": "定义不缩小操作区/长文换行滚动；320窄屏/149–260键盘回归；真实Dynamic Type与两方向系统安全区仍待真机验收",
+      "selected_standard": "定义不缩小操作区/长文换行滚动；320窄屏/149–260键盘回归；真实Dynamic Type与两方向系统安全区仍待真机验收"
+    }
+  ],
+  "baseline_runtime_evidence": [
+    {
+      "path": "build/verification/settings-dimensions-audit.json",
+      "scope": "Chrome loading actual iOS frontend with mocked bridge; 390x844 and 844x390; settings, line, auth, about; not physical device measurements"
+    },
+    {
+      "path": "build/releases/1.1.100/verification/panels-regression.log",
+      "scope": "previous final-build behavior/geometry checks, not full-app size acceptance"
+    }
+  ],
+  "runtime_evidence": [
+    {
+      "path": "build/releases/1.1.101/verification/dimensions-regression.log",
+      "scope": "production iOS frontend CSS geometry, settings/select/loader, adaptive dialogs and seek receiver; mocked native API"
+    },
+    {
+      "path": "build/releases/1.1.101/verification/panels-regression.log",
+      "scope": "navigation, auth modes, keyboard viewports, real form dispatch with mocked network"
+    },
+    {
+      "path": "build/releases/1.1.101/verification/library-regression.log",
+      "scope": "history paging/failed records/clear lifecycle and shared dialogs"
+    },
+    {
+      "path": "build/verification/size-unification/cover-action-menu-results.json",
+      "scope": "10 browser groups/13 menu combinations, pointer/keyboard/disabled/fallback; mocked consumers"
+    },
+    {
+      "path": "build/releases/1.1.101/verification/device-build.log",
+      "scope": "native iOS archive/export and bridge-removal linking"
+    }
+  ]
+}

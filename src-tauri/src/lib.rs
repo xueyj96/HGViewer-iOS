@@ -1,7 +1,5 @@
 mod api;
 #[cfg(target_os = "ios")]
-mod ios_cover_menu;
-#[cfg(target_os = "ios")]
 mod ios_download_background;
 #[cfg(target_os = "ios")]
 mod ios_media;
@@ -158,8 +156,6 @@ pub fn run() {
             ios_orientation::set_ios_status_bar_hidden,
             #[cfg(target_os = "ios")]
             ios_orientation::ios_horizontal_safe_area,
-            #[cfg(target_os = "ios")]
-            ios_cover_menu::ios_cover_menu_update,
             #[cfg(target_os = "ios")]
             ios_player::ios_player_open,
             #[cfg(target_os = "ios")]

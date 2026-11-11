@@ -4,7 +4,7 @@ import { api, fmt, isIos, cover as imageCover } from "../api";
 import { handleArticleClick, sanitizeHtml } from "../html";
 import type { Comment, CommentPage, Episode } from "../types";
 import { useStore } from "../store";
-import { Avatar, CompactAction, Empty, PageStatus } from "./ui";
+import { Avatar, CompactAction, Empty, LoadingStatus, PageStatus } from "./ui";
 import { CompactDownloadButton } from "./DownloadControls";
 import { useIOSKeyboardViewport } from "./useIOSKeyboardViewport";
 import { IOSPageBar } from "./IOSPageBar";
@@ -178,7 +178,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", showNavigati
             </div>
           </article>
         )) : loading ? (
-          <div className="flex justify-center py-10"><div className="w-7 h-7 spinner" /></div>
+          <div className="flex justify-center"><LoadingStatus variant="initial" label="正在加载评论" /></div>
         ) : failed ? (
           <PageStatus title="评论加载失败" onRetry={() => void load(1)} />
         ) : isIos ? (
@@ -188,7 +188,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", showNavigati
         )}
         {items.length > 0 && (loading || page < pages) && (
           <div className="flex justify-center py-4">
-            {loading ? <div className="w-5 h-5 spinner" />
+            {loading ? <LoadingStatus variant="tail" label="正在加载更多评论" />
               : page < pages ? (
                 <CompactAction tone="neutral" onClick={() => void load(page + 1)}>{failed ? "重试" : "查看更多"}</CompactAction>
               ) : null}
@@ -205,7 +205,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", showNavigati
         ) : (
           <form className={`flex items-center gap-2 ${isIos ? "hg-ios-content-card" : "py-2.5 bg-s2/70"}`}
             onSubmit={(e) => { e.preventDefault(); void send(); }}>
-            <Avatar size={30} name={user?.nickname || "我"} hue={322} />
+            <Avatar size={32} name={user?.nickname || "我"} hue={322} />
             <input value={text} onChange={(e) => setText(e.target.value)}
               onFocus={() => { if (!user) setLoginOpen(true); }}
               placeholder={user ? "说点什么…" : "登录后参与评论"}
@@ -213,7 +213,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", showNavigati
               className={`flex-1 min-w-0 rounded-(--r-ctl) bg-s4 px-3.5 text-on placeholder-dim outline-none focus:bg-s3 ${isIos ? "h-11 text-base" : "h-9 text-[12.5px]"}`} />
             <button type="submit" aria-label="发送评论" disabled={!text.trim() || sending}
               className={`shrink-0 flex items-center justify-center pressable ${isIos ? "size-11 rounded-(--r-ctl) bg-primary text-on-primary disabled:bg-s3 disabled:text-dim" : "size-9 rounded-full bg-s3 text-on"}`}>
-              {sending ? <span className="w-4 h-4 spinner" /> : <ISendF size={16} />}
+              {sending ? <LoadingStatus variant="button" label="正在发送评论" /> : <ISendF size={16} />}
             </button>
           </form>
         )}

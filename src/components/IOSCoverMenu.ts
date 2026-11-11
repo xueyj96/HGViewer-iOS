@@ -1,7 +1,5 @@
-import { IOS_LAYOUT_CHANGE } from "../iosGeometry";
 import { api, isIos } from "../api";
 import { useStore } from "../store";
-import { invoke } from "@tauri-apps/api/core";
 import { useLayoutEffect, useRef, type RefObject } from "react";
 
 type CoverAction = { id: number; history: boolean; action: "cache" | "restart" | "remove" };
@@ -9,87 +7,94 @@ type EpisodeAction = { id: number; history: boolean; action: "delete-episode"; e
 export type DownloadAction = "pause-download" | "resume-download" | "download-remaining" | "stop-saving" | "view-episodes" | "all-cached";
 type DownloadMenuAction = { id: number; history: boolean; action: DownloadAction | "cancel-download" };
 type BrowseAction = { id: number; history: boolean; action: "browse-open" | "browse-cache" };
-type MenuAction = CoverAction | EpisodeAction | DownloadMenuAction | BrowseAction;
+export type MenuAction = CoverAction | EpisodeAction | DownloadMenuAction | BrowseAction;
 type BrowseKind = "video" | "post";
 
 export function browseCoverAttributes(id: number, kind: BrowseKind = "video") {
   return isIos ? { "data-hg-menu-card": id, "data-hg-browse-kind": kind } : {};
 }
-let revision = Date.now() * 1024;
+type MenuMode = "covers" | "episodes" | "downloads" | "browse";
+type MenuOwner = { container: HTMLElement; history: boolean; mode: MenuMode };
+export type CoverMenuItem = {
+  action: MenuAction["action"]; label: string; disabled?: boolean; destructive?: boolean; hint?: string;
+};
+export type CoverMenuTarget = MenuOwner & { card: HTMLElement; id: number; ep?: number; items: CoverMenuItem[] };
+const owners = new Set<MenuOwner>();
+const eventOwners = new WeakMap<Event, MenuOwner>();
+export const COVER_MENU_CHANGE = "hg-cover-menu-change";
+
+/** Resolve only cards belonging to an enabled, visible consumer. No native installer is registered. */
+export function getCoverMenu(card: HTMLElement): CoverMenuTarget | undefined {
+  if (!card.isConnected || card.closest("[inert], [hidden]") || card.matches(":disabled") ||
+    !card.getClientRects().length || getComputedStyle(card).visibility !== "visible") return;
+  const owner = [...owners].find((item) => item.container.contains(card) && !item.container.closest("[inert]"));
+  if (!owner) return;
+  const id = Number(card.dataset.hgMenuCard);
+  if (!Number.isSafeInteger(id) || id <= 0) return;
+  const { history, mode } = owner;
+  const items: CoverMenuItem[] = [];
+  let ep: number | undefined;
+  if (mode === "browse" && card.dataset.hgBrowseKind) {
+    const post = card.dataset.hgBrowseKind === "post";
+    items.push({ action: "browse-open", label: post ? "查看图文" : "播放剧集" });
+    if (!post) items.push({ action: "browse-cache", label: "缓存剧集" });
+  } else if (mode === "episodes" && card.dataset.hgMenuEpisode) {
+    ep = Number(card.dataset.hgMenuEpisode);
+    if (!Number.isSafeInteger(ep) || ep < 0) return;
+    items.push({ action: "delete-episode", label: "删除本集缓存", destructive: true });
+  } else if (mode === "downloads" && card.dataset.hgDownloadAction) {
+    const action = card.dataset.hgDownloadAction as DownloadAction;
+    const labels: Partial<Record<DownloadAction, string>> = {
+      "pause-download": "暂停下载", "resume-download": "继续下载", "download-remaining": "缓存剩余",
+      "stop-saving": "停止保留", "all-cached": "全部已缓存",
+    };
+    const blocked = card.dataset.hgDownloadBlocked === "true";
+    if (labels[action]) items.push({ action, label: labels[action]!, disabled: blocked || action === "all-cached",
+      hint: blocked ? "等当前缓存任务结束后可用" : undefined });
+    items.push({ action: "view-episodes", label: "查看剧集" });
+    if (action === "pause-download" || action === "resume-download") {
+      items.push({ action: "cancel-download", label: "取消下载", destructive: true, disabled: blocked });
+    }
+  } else if (mode === "covers" && !card.dataset.hgBrowseKind && !card.dataset.hgMenuEpisode && !card.dataset.hgDownloadAction) {
+    const available = card.dataset.hgUnavailable !== "true";
+    if (available && card.dataset.hgCanCache === "true") items.push({ action: "cache", label: "缓存剧集" });
+    if (history && available) items.push({ action: "restart", label: "从头播放" });
+    items.push({ action: "remove", label: history ? "移除这条记录" : "取消收藏", destructive: true });
+  }
+  return items.length ? { ...owner, card, id, ep, items } : undefined;
+}
+
+export function runCoverMenuAction(target: CoverMenuTarget, action: MenuAction["action"]) {
+  const current = getCoverMenu(target.card);
+  if (!current || current.container !== target.container || current.id !== target.id || current.ep !== target.ep ||
+    current.history !== target.history || current.mode !== target.mode ||
+    !current.items.some((item) => item.action === action && !item.disabled)) return;
+  const owner = [...owners].find((item) => item.container === current.container && item.mode === current.mode && item.history === current.history);
+  if (!owner) return;
+  const detail = { id: current.id, history: current.history, action, ...(current.ep !== undefined ? { ep: current.ep } : {}) };
+  const event = new CustomEvent("hg-cover-action", { detail });
+  eventOwners.set(event, owner);
+  window.dispatchEvent(event);
+}
 
 export function useIOSCoverMenu(
   scroll: RefObject<HTMLDivElement | null> | undefined,
   enabled: boolean,
   history: boolean,
   onAction: (action: MenuAction) => void,
-  mode: "covers" | "episodes" | "downloads" | "browse" = "covers",
+  mode: MenuMode = "covers",
 ) {
   const action = useRef(onAction);
   action.current = onAction;
   useLayoutEffect(() => {
     const container = scroll?.current;
     if (!enabled || !container) return;
-    let frame = 0;
-    let last = "";
-    const send = (covers: object[]) =>
-      void invoke("ios_cover_menu_update", { revision: ++revision, history, covers }).catch(() => {});
-    const update = () => {
-      frame = 0;
-      if (container.closest("[inert]")) {
-        if (last !== "[]") { last = "[]"; send([]); }
-        return;
-      }
-      const viewport = container.getBoundingClientRect();
-      const tabBarTop = mode === "episodes" ? undefined : document.querySelector(".hg-tabbar:not([inert])")?.getBoundingClientRect().top;
-      const bottom = Math.min(viewport.bottom, tabBarTop ?? viewport.bottom);
-      const previous = container.previousElementSibling;
-      const bar = previous?.matches(".hg-ios-floating-bar-anchor, .hg-ios-floating-bar") ? previous : undefined;
-      const top = Math.max(viewport.top, bar?.getBoundingClientRect().bottom ?? viewport.top);
-      const visibleRect = (element: HTMLElement) => {
-        const rect = element.getBoundingClientRect();
-        const x = Math.max(rect.left, viewport.left);
-        const y = Math.max(rect.top, top);
-        const width = Math.min(rect.right, viewport.right) - x;
-        const height = Math.min(rect.bottom, bottom) - y;
-        return width > 0 && height > 0 ? { x, y, width, height } : undefined;
-      };
-      const covers = [...container.querySelectorAll<HTMLElement>("[data-hg-menu-card]")].flatMap((card) => {
-        const rect = visibleRect(card);
-        if (!rect) return [];
-        const preview = card.querySelector<HTMLElement>("[data-hg-menu-preview]") ?? card;
-        const previewRect = visibleRect(preview);
-        const radius = parseFloat(getComputedStyle(preview).borderTopLeftRadius) || 0;
-        return [{
-          id: Number(card.dataset.hgMenuCard), ...rect,
-          preview: previewRect && { ...previewRect, radius },
-          browse_kind: card.dataset.hgBrowseKind,
-          can_cache: card.dataset.hgCanCache === "true",
-          unavailable: card.dataset.hgUnavailable === "true",
-          ep: card.dataset.hgMenuEpisode ? Number(card.dataset.hgMenuEpisode) : undefined,
-          download_action: card.dataset.hgDownloadAction,
-          download_blocked: card.dataset.hgDownloadBlocked === "true",
-        }];
-      });
-      const signature = JSON.stringify(covers);
-      if (signature === last) return;
-      last = signature;
-      send(covers);
-    };
-    const schedule = () => { if (!frame) frame = requestAnimationFrame(update); };
-    const observer = new ResizeObserver(schedule);
-    observer.observe(container);
-    const card = container.querySelector("[data-hg-menu-card]");
-    const grid = mode === "episodes" ? card?.parentElement : card?.parentElement?.parentElement;
-    if (grid) observer.observe(grid);
-    const mutations = new MutationObserver(schedule);
-    mutations.observe(container, { subtree: true, childList: true, attributes: true,
-      attributeFilter: ["inert", "data-hg-menu-card", "data-hg-browse-kind", "data-hg-menu-episode", "data-hg-can-cache", "data-hg-unavailable", "data-hg-download-action", "data-hg-download-blocked"] });
-    const workspace = container.closest(".win-main");
-    for (let ancestor = container.parentElement; ancestor && ancestor !== workspace; ancestor = ancestor.parentElement) {
-      mutations.observe(ancestor, { attributes: true, attributeFilter: ["inert"] });
-    }
+    const owner = { container, history, mode };
+    owners.add(owner);
     const receive = (event: Event) => {
       const detail = (event as CustomEvent<MenuAction>).detail;
+      const source = eventOwners.get(event);
+      if (source && source !== owner) return;
       if (!detail || detail.history !== history || container.closest("[inert]")) return;
       const actionMode = detail.action === "delete-episode" ? "episodes"
         : detail.action === "cache" || detail.action === "restart" || detail.action === "remove" ? "covers"
@@ -97,22 +102,12 @@ export function useIOSCoverMenu(
         : "downloads";
       if (actionMode === mode) action.current(detail);
     };
-    container.addEventListener("scroll", schedule, { passive: true });
-    window.addEventListener("resize", schedule);
-    window.addEventListener(IOS_LAYOUT_CHANGE, schedule);
-    if (mode === "browse") window.addEventListener("animationend", schedule);
     window.addEventListener("hg-cover-action", receive);
-    update();
+    window.dispatchEvent(new Event(COVER_MENU_CHANGE));
     return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      mutations.disconnect();
-      container.removeEventListener("scroll", schedule);
-      window.removeEventListener("resize", schedule);
-      window.removeEventListener(IOS_LAYOUT_CHANGE, schedule);
-      if (mode === "browse") window.removeEventListener("animationend", schedule);
+      owners.delete(owner);
       window.removeEventListener("hg-cover-action", receive);
-      send([]);
+      window.dispatchEvent(new Event(COVER_MENU_CHANGE));
     };
   }, [scroll, enabled, history, mode]);
 }

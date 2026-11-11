@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api, APP_NAME, APP_VERSION, hostOf, isIos, platformLabel, type DownloadSettings, type UpdateInfo } from "../api";
 import { HISTORY_LIMIT, useStore } from "../store";
-import { CompactAction, ConfirmAction, Modal, PageStatus, Toggle } from "../components/ui";
-import { IOSCloseButton, IOSPageBar } from "../components/IOSPageBar";
+import { ActionDialog, CompactAction, ConfirmAction, Modal, Sheet, Toggle } from "../components/ui";
+import { IOSPageBar } from "../components/IOSPageBar";
 import { useIOSSymbols } from "../components/IOSSymbol";
 import AccountCard from "../components/AccountCard";
 import LinePicker from "../components/LinePicker";
@@ -16,20 +16,20 @@ const Section = ({ title, children }: { title: string; children: ReactNode }) =>
   </>
 );
 
-function DownloadSettingRow({ label, description, unit, icon, value, disabled, onChange }: {
+function DownloadSettingRow({ label, description, unit, icon, value, disabled, readFailed = false, onChange }: {
   label: string; description: string; unit: string; icon: ReactNode;
-  value?: number; disabled: boolean; onChange: (value: number) => void;
+  value?: number; disabled: boolean; readFailed?: boolean; onChange: (value: number) => void;
 }) {
-  return <label className="flex items-center gap-3 px-3.5 py-3">
+  return <label className="hg-ios-settings-row flex items-center gap-3 px-3.5 py-3">
     <span aria-hidden="true" className="grid size-8 shrink-0 place-items-center rounded-full bg-s3 text-primary">{icon}</span>
     <span className="min-w-0 flex-1">
-      <span className="block text-[12.5px] text-on">{label}</span>
-      <span className="block text-[10.5px] text-mut">{description}</span>
+      <span className="hg-setting-title block text-[12.5px] text-on">{label}</span>
+      <span className="hg-setting-detail block text-[10.5px] text-mut">{description}</span>
     </span>
     <select aria-label={label} value={value ?? ""} disabled={disabled || value === undefined}
       className="min-h-11 rounded-(--r-ctl) bg-s3 px-3 text-sm font-medium text-primary"
       onChange={(event) => onChange(Number(event.target.value))}>
-      {value === undefined && <option value="">读取中</option>}
+      {value === undefined && <option value="">{readFailed ? "读取失败" : "读取中"}</option>}
       {[1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}{unit && ` ${unit}`}</option>)}
     </select>
   </label>;
@@ -49,6 +49,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [downloads, setDownloads] = useState<DownloadSettings>();
+  const [downloadReadStatus, setDownloadReadStatus] = useState<"loading" | "failed" | "ready">("loading");
   const [savingDownloads, setSavingDownloads] = useState(false);
   const [diagnosis, setDiagnosis] = useState<{ status: "loading" | "failed" } | { status: "ready"; text: string } | null>(null);
   const [diagnosisOpen, setDiagnosisOpen] = useState(false);
@@ -59,10 +60,21 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
     api.lineState().then((s) => setLineBase(s.base)).catch(() => {});
   };
   useEffect(readLine, []);
+
+  const readDownloadSettings = async () => {
+    setDownloadReadStatus("loading");
+    try {
+      setDownloads(await api.offlineDownloadSettings());
+      setDownloadReadStatus("ready");
+    } catch {
+      setDownloadReadStatus("failed");
+    }
+  };
+
   useEffect(() => {
     if (!isIos) return;
-    api.offlineDownloadSettings().then(setDownloads).catch(() => toast("无法读取下载设置", "info"));
-  }, [toast]);
+    void readDownloadSettings();
+  }, []);
 
   const changeDownloadSettings = async (changes: Partial<Omit<DownloadSettings, "background_supported">>) => {
     setSavingDownloads(true);
@@ -107,6 +119,61 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
       toast("无法自动复制，可选择结果手动复制", "info");
     }
   };
+
+  const copyVersionInfo = async () => {
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(`HGViewer v${APP_VERSION}`);
+      toast("版本信息已复制", "ok");
+    } catch {
+      toast("无法复制版本信息", "info");
+    }
+  };
+
+  const aboutContent = (
+    <div className={isIos ? "hg-ios-about-content" : "p-5"}>
+      <div className="flex items-center gap-3">
+        <span className="w-11 h-11 rounded-(--r-sm) brand-grad glow-neon flex items-center justify-center text-on-primary text-[17px] font-black">H</span>
+        <div>
+          <div className="text-[16px] font-bold text-on leading-tight">{APP_NAME}</div>
+          <div className="text-[11px] text-mut mt-0.5">黄果短剧 · 第三方客户端 v{APP_VERSION}</div>
+        </div>
+      </div>
+
+      <p className="text-[12px] text-on/70 leading-relaxed mt-4">
+        {isIos
+          ? "HGViewer 是 iPhone 上的短剧和图文浏览客户端，支持离线缓存和沉浸式播放。"
+          : "基于 Rust + Tauri 2 构建的跨平台客户端，支持 Windows、macOS 与 Android。界面遵循 Fluent 设计语言，播放器采用沉浸式竖屏信息流。"}
+      </p>
+
+      <div className="mt-4 rounded-(--r-sm) bg-s3/60 p-3 text-[11px] text-mut leading-relaxed">
+        本项目仅供学习与交流，所有内容均来自上游站点，客户端不存储、不分发任何视频内容。
+        请于 24 小时内删除相关资源，并支持正版。
+      </div>
+
+      <div className="mt-4 divide-y divide-s3">
+        <button onClick={() => { navigator.clipboard?.writeText("https://github.com/Minireel/HGhub").then(() => toast("仓库地址已复制", "ok")).catch(() => {}); }}
+          className="w-full min-h-11 flex items-center gap-2 py-2.5 text-left pressable">
+          {symbol("link", <ILink size={15} />, 15, "text-mut")}
+          <span className="text-[12px] text-on/85">github.com/Minireel/HGhub</span>
+          <span className="ml-auto text-[10.5px] text-primary">复制</span>
+        </button>
+        <button onClick={() => { navigator.clipboard?.writeText("https://huangguoai.com").then(() => toast("站点地址已复制", "ok")).catch(() => {}); }}
+          className="w-full min-h-11 flex items-center gap-2 py-2.5 text-left pressable">
+          {symbol("link", <ILink size={15} />, 15, "text-mut")}
+          <span className="text-[12px] text-on/85">huangguoai.com</span>
+          <span className="ml-auto text-[10.5px] text-primary">复制</span>
+        </button>
+        <div className="flex items-center gap-2 py-2.5">
+          {symbol("info.circle", <IInfo size={15} />, 15, "text-mut")}
+          <span className="text-[12px] text-on/85">PolyForm Noncommercial 1.0.0</span>
+          <span className="ml-auto text-[10.5px] text-mut">仅限非商业</span>
+        </div>
+      </div>
+
+      {!isIos && <button onClick={() => setAbout(false)} className="mt-4 w-full min-h-11 rounded-(--r-ctl) bg-s3 text-[13px] font-semibold text-on pressable">知道了</button>}
+    </div>
+  );
 
   return (
     <div className="hg-ios-settings-page absolute inset-0 bg-bg flex flex-col">
@@ -163,7 +230,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
           {isIos && <Section title="播放"><PlaybackSidebarSettings /></Section>}
 
           {isIos && <Section title="下载">
-              <div className="flex items-center gap-3 px-3.5 py-3">
+              <div className="hg-ios-settings-row flex items-center gap-3 px-3.5 py-3">
                 <span aria-hidden="true" className="grid size-8 shrink-0 place-items-center rounded-full bg-s3 text-primary">
                   {symbol("arrow.down.circle", <IDownload size={16} />)}
                 </span>
@@ -180,14 +247,22 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               </div>
               <DownloadSettingRow label="同时下载数" description="其余作品按加入顺序排队" unit="部"
                 icon={symbol("arrow.down.circle", <IDownload size={16} />)}
-                value={downloads?.limit} disabled={savingDownloads} onChange={(limit) => void changeDownloadSettings({ limit })} />
+                value={downloads?.limit} disabled={savingDownloads} readFailed={downloadReadStatus === "failed"} onChange={(limit) => void changeDownloadSettings({ limit })} />
               <DownloadSettingRow label="单集分片并发" description="仅 HLS，下一个下载的集数生效" unit="路"
                 icon={symbol("bolt", <IBoltF size={16} />)}
-                value={downloads?.segments} disabled={savingDownloads} onChange={(segments) => void changeDownloadSettings({ segments })} />
+                value={downloads?.segments} disabled={savingDownloads} readFailed={downloadReadStatus === "failed"} onChange={(segments) => void changeDownloadSettings({ segments })} />
+              {downloadReadStatus === "failed" && <div className="hg-ios-settings-row flex items-center gap-3 px-3.5 py-3">
+                <div className="min-w-0 flex-1">
+                  <div role="alert" className="text-[12px] leading-5 text-danger">下载设置读取失败</div>
+                  <div className="text-[11px] leading-4 text-mut">当前设置未更改</div>
+                </div>
+                <CompactAction tone="neutral" onClick={() => void readDownloadSettings()}>重试</CompactAction>
+              </div>}
+              {savingDownloads && <span role="status" className="sr-only">正在保存下载设置…</span>}
           </Section>}
 
           <Section title="本地数据">
-            <div className="flex items-center gap-3 px-3.5 py-3">
+            <div className="hg-ios-settings-row flex items-center gap-3 px-3.5 py-3">
               <span className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-primary">{symbol("heart", <IHeart size={16} />)}</span>
               <div className="flex-1 min-w-0">
                 <div className="text-[12.5px] text-on">{isIos ? "收藏与历史" : "本地喜欢"}</div>
@@ -195,7 +270,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               </div>
             </div>
             <button type="button" disabled={history.length === 0} onClick={() => setHistoryClearOpen(true)}
-              className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-40">
+              className="hg-ios-settings-row w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-40">
               <span aria-hidden="true" className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-danger">{symbol("clock", <IClock size={16} />)}</span>
               <div className="flex-1 min-w-0">
                 <div className="text-[12.5px] text-danger">清空观看历史</div>
@@ -203,7 +278,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               </div>
               {symbol("chevron.right", <IChevR size={15} />, 15, "text-mut")}
             </button>
-            <button onClick={() => setClearOpen(true)} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
+            <button onClick={() => setClearOpen(true)} className="hg-ios-settings-row w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
               <span className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-primary">{symbol("trash", <IBroom size={16} />)}</span>
               <div className="flex-1 min-w-0">
                 <div className="text-[12.5px] text-on">清理缓存</div>
@@ -214,7 +289,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
           </Section>
 
           <Section title="网络">
-            <button onClick={() => setLineOpen(true)} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
+            <button onClick={() => setLineOpen(true)} className="hg-ios-settings-row w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
               <span className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-primary">{symbol("bolt", <IBoltF size={16} />)}</span>
               <div className="flex-1 min-w-0">
                 <div className="text-[12.5px] text-on">线路</div>
@@ -222,14 +297,14 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               </div>
               {symbol("chevron.right", <IChevR size={15} />, 15, "text-mut")}
             </button>
-            <div className="flex items-center gap-3 px-3.5 py-3">
+            <div className="hg-ios-settings-row flex items-center gap-3 px-3.5 py-3">
               <span className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-primary">{symbol("lock", <ILockF size={15} />, 15)}</span>
               <div className="flex-1 min-w-0">
                 <div className="text-[12.5px] text-on">严格安全模式</div>
                 <div className="text-[10.5px] text-mut">
                   {cliRelaxed
-                    ? "已由启动参数 --no-strict 切换为兼容模式；可手动重新开启"
-                    : "默认开启，防上游投毒与内网探测；若导致正文或特殊代理异常可关闭（或用 --no-strict 启动）"}
+                    ? "当前为兼容模式，可手动开启"
+                    : "默认开启，拦截危险内容与内网请求"}
                 </div>
               </div>
               <Toggle
@@ -237,14 +312,14 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 disabled={!strictSecurityReady || securityPending}
                 onChange={(on) => {
                   void setStrictSecurity(on).then(() => {
-                    toast(on ? "已开启严格安全模式" : "已切换为兼容模式（关闭激进清洗与守卫）", "info");
+                    toast(on ? "已开启严格安全模式" : "已切换为兼容模式", "info");
                   }).catch(() => toast("安全设置保存失败，已保持原模式", "info"));
                 }}
                 label="严格安全模式"
               />
             </div>
             <button onClick={() => void diagnose()} disabled={diagnosis?.status === "loading"}
-              className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-60">
+              className="hg-ios-settings-row w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-60">
               <span className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-primary">{symbol("link", <ILink size={16} />)}</span>
               <div className="flex-1 min-w-0">
                 <div className="text-[12.5px] text-on">网络诊断</div>
@@ -255,7 +330,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
           </Section>
 
           {!isIos && <Section title="其他">
-            <button onClick={checkUpdate} disabled={checking} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-60">
+            <button onClick={checkUpdate} disabled={checking} className="hg-ios-settings-row w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-60">
               <span className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-primary">{symbol("arrow.clockwise", <IRefresh size={16} />)}</span>
               <div className="flex-1 min-w-0">
                 <div className="text-[12.5px] text-on">检查更新</div>
@@ -263,7 +338,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               </div>
               {symbol("chevron.right", <IChevR size={15} />, 15, "text-mut")}
             </button>
-            <button onClick={() => setAbout(true)} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
+            <button onClick={() => setAbout(true)} className="hg-ios-settings-row w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
               <span className="w-8 h-8 shrink-0 rounded-full bg-s3 flex items-center justify-center text-primary">{symbol("info.circle", <IInfo size={16} />)}</span>
               <div className="flex-1 min-w-0">
                 <div className="text-[12.5px] text-on">关于 {APP_NAME}</div>
@@ -279,65 +354,32 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
 
       <LinePicker open={lineOpen} onClose={() => { setLineOpen(false); readLine(); }} />
 
-      <Modal open={diagnosisOpen} onClose={() => setDiagnosisOpen(false)} width={392} label="网络诊断">
-        <section role="dialog" aria-modal="true" aria-label="网络诊断结果" className="space-y-2 p-4">
-          <header className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold">网络诊断结果</h2>
-            <IOSCloseButton onClose={() => setDiagnosisOpen(false)} />
-          </header>
-          {diagnosis?.status === "loading" && <p className="text-sm text-mut" role="status">正在检测…</p>}
-          {diagnosis?.status === "failed" && <PageStatus title="网络诊断失败" onRetry={() => void diagnose()} />}
-          {diagnosis?.status === "ready" && <>
-            <pre className="max-h-[40dvh] overflow-auto select-text whitespace-pre-wrap break-all rounded-(--r-md) bg-s3 p-3 text-xs text-mut">{diagnosis.text}</pre>
-            <CompactAction onClick={() => void copyDiagnosis(diagnosis.text)}>复制诊断</CompactAction>
-          </>}
-        </section>
-      </Modal>
+      <ActionDialog open={diagnosisOpen} onCancel={() => setDiagnosisOpen(false)} title="网络诊断"
+        cancel="退出" confirm="复制诊断" disabled={diagnosis?.status !== "ready"}
+        onConfirm={() => { if (diagnosis?.status === "ready") void copyDiagnosis(diagnosis.text); }}>
+        {diagnosis?.status === "loading" && <p role="status">正在检测…</p>}
+        {diagnosis?.status === "failed" && <p role="alert">诊断失败，请退出后重试。</p>}
+        {diagnosis?.status === "ready" && <pre tabIndex={0} aria-label="诊断详情"
+          className="select-text whitespace-pre-wrap break-all text-[11px] leading-5">{diagnosis.text}</pre>}
+      </ActionDialog>
 
-      <Modal open={about} onClose={() => setAbout(false)} width={392} label={`关于 ${APP_NAME}`}>
-        <div className="p-5">
-          <div className="flex items-center gap-3">
-            <span className="w-11 h-11 rounded-(--r-sm) brand-grad glow-neon flex items-center justify-center text-on-primary text-[17px] font-black">H</span>
-            <div>
-              <div className="text-[16px] font-bold text-on leading-tight">{APP_NAME}</div>
-              <div className="text-[11px] text-mut mt-0.5">黄果短剧 · 第三方客户端 v{APP_VERSION}</div>
-            </div>
+      {isIos ? (
+        <Sheet open={about} onClose={() => setAbout(false)} fullPage="关于" sharedChrome z="z-[32]">
+          <div className="hg-ios-about-page flex h-full min-h-0 flex-col">
+            <IOSPageBar label="关于" overlay hidden={!about} onBack={() => setAbout(false)} endAction={
+              <button type="button" aria-label="复制版本信息" onClick={() => void copyVersionInfo()}
+                className="hg-ios-floating-button hg-ios-header-square grid place-items-center text-[13px] font-semibold text-primary">复制</button>
+            }>
+              <h1 className="min-w-0 flex-1 truncate text-center text-[13px] font-semibold">关于</h1>
+            </IOSPageBar>
+            <div className="hg-ios-browse-content flex-1 scroll-y">{aboutContent}</div>
           </div>
-
-          <p className="text-[12px] text-on/70 leading-relaxed mt-4">
-            {isIos
-              ? "HGViewer 是 iPhone 上的短剧和图文浏览客户端，支持离线缓存和沉浸式播放。"
-              : "基于 Rust + Tauri 2 构建的跨平台客户端，支持 Windows、macOS 与 Android。界面遵循 Fluent 设计语言，播放器采用沉浸式竖屏信息流。"}
-          </p>
-
-          <div className="mt-4 rounded-(--r-sm) bg-s3/60 p-3 text-[11px] text-mut leading-relaxed">
-            本项目仅供学习与交流，所有内容均来自上游站点，客户端不存储、不分发任何视频内容。
-            请于 24 小时内删除相关资源，并支持正版。
-          </div>
-
-          <div className="mt-4 divide-y divide-s3">
-            <button onClick={() => { navigator.clipboard?.writeText("https://github.com/Minireel/HGhub").then(() => toast("仓库地址已复制", "ok")).catch(() => {}); }}
-              className="w-full min-h-11 flex items-center gap-2 py-2.5 text-left pressable">
-              {symbol("link", <ILink size={15} />, 15, "text-mut")}
-              <span className="text-[12px] text-on/85">github.com/Minireel/HGhub</span>
-              <span className="ml-auto text-[10.5px] text-primary">复制</span>
-            </button>
-            <button onClick={() => { navigator.clipboard?.writeText("https://huangguoai.com").then(() => toast("站点地址已复制", "ok")).catch(() => {}); }}
-              className="w-full min-h-11 flex items-center gap-2 py-2.5 text-left pressable">
-              {symbol("link", <ILink size={15} />, 15, "text-mut")}
-              <span className="text-[12px] text-on/85">huangguoai.com</span>
-              <span className="ml-auto text-[10.5px] text-primary">复制</span>
-            </button>
-            <div className="flex items-center gap-2 py-2.5">
-              {symbol("info.circle", <IInfo size={15} />, 15, "text-mut")}
-              <span className="text-[12px] text-on/85">PolyForm Noncommercial 1.0.0</span>
-              <span className="ml-auto text-[10.5px] text-mut">仅限非商业</span>
-            </div>
-          </div>
-
-          <button onClick={() => setAbout(false)} className="hg-ios-primary mt-4 w-full min-h-11 rounded-(--r-ctl) bg-s3 text-[13px] font-semibold text-on pressable">知道了</button>
-        </div>
-      </Modal>
+        </Sheet>
+      ) : (
+        <Modal open={about} onClose={() => setAbout(false)} width={392} label={`关于 ${APP_NAME}`}>
+          {aboutContent}
+        </Modal>
+      )}
 
       <ConfirmAction open={historyClearOpen} title="清空观看历史"
         message="清空全部观看记录和续播进度？收藏与已下载分集会保留。" confirm="清空历史"

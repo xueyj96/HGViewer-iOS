@@ -26,7 +26,7 @@ export function ShowCoverCard({ title, cover, local = false, badge, menu, progre
         {percent !== undefined && percent > 0 && <span aria-hidden="true"
           className={`pointer-events-none absolute inset-x-0 bottom-0 motion-safe:transition-[height] motion-safe:duration-300 ${progress?.paused ? "bg-white/20" : "bg-primary/35"}`}
           style={{ height: `${percent}%` }} />}
-        {(progressLabel || badge) && <span className="absolute left-1.5 top-1.5 rounded-full bg-black/65 px-1.5 py-0.5 text-[9.5px] leading-none text-white/90">
+        {(progressLabel || badge) && <span className="hg-content-badge absolute left-1.5 top-1.5 rounded-full bg-black/65 px-1.5 py-0.5 hg-meta text-[9.5px] leading-none text-white/90">
           {progressLabel || badge}
         </span>}
         {progress?.speed && <span aria-hidden="true" className="pointer-events-none absolute inset-0 grid place-items-center px-1">
@@ -36,7 +36,7 @@ export function ShowCoverCard({ title, cover, local = false, badge, menu, progre
           </span>
         </span>}
         <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-2">
-          <span className="clamp-2 text-[10.5px] leading-tight text-white">{title}</span>
+          <span className="hg-cover-title clamp-2 hg-meta text-[10.5px] leading-tight text-white">{title}</span>
         </span>
       </button>
     </div>

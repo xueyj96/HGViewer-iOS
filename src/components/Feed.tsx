@@ -928,7 +928,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       </div>
     ) : sidebar.length > 0 ? (
       <div className="hg-ios-playback-column absolute inset-y-0 pointer-events-none" hidden={railHidden} inert={railHidden}
-        style={{ "--hg-player-bottom-inset": `${bottomInset}px` } as React.CSSProperties}>
+        style={{ "--hg-player-bottom-inset": isIos ? "var(--ios-navigation-clearance)" : `${bottomInset}px` } as React.CSSProperties}>
         <div className="hg-ios-video-actions hg-ios-feed-rail no-bar absolute flex flex-col items-center pointer-events-auto"
           {...playbackGestures}
           onPointerDown={(e) => onDown(e, true)}
@@ -951,7 +951,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   return (
     <div
       className={`hg-player-ui absolute inset-0 overflow-hidden bg-black player-root ${isDesktop ? "player-surface" : ""} ${theater ? "is-theater" : ""} ${rotated ? "fs-landscape" : ""} ${isDesktop && idle ? "is-idle" : ""} ${isIos && active && clear && !fullPanel ? "is-clear" : ""}`}
-      style={isIos ? { "--hg-player-bottom-inset": `${bottomInset}px` } as React.CSSProperties : undefined}
+      style={isIos ? { "--hg-player-bottom-inset": "var(--ios-navigation-clearance)" } as React.CSSProperties : undefined}
       onPointerMove={() => { if (isDesktop) wake(); }}>
       {/* 氛围背景 */}
       <div className="absolute inset-0 scale-110 blur-3xl opacity-25 pointer-events-none">
@@ -1116,7 +1116,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
               {/* 移动端：剧名与集数、播放进度 */}
               {!fs && !isDesktop && (
-                <div className={`hg-ios-video-caption absolute inset-x-0 z-20 ${offlineItems ? "pointer-events-none" : ""}`} style={{ bottom: `calc(var(--sab, 0px) + ${bottomInset}px)` }}>
+                <div className={`hg-ios-video-caption absolute inset-x-0 z-20 ${offlineItems ? "pointer-events-none" : ""}`} style={{ bottom: isIos ? "var(--ios-navigation-reserve)" : `calc(var(--sab, 0px) + ${bottomInset}px)` }}>
                   <div className="hg-ios-caption-scrim absolute inset-x-0 bottom-0 h-[190px] pointer-events-none"
                     style={{ background: "linear-gradient(0deg, rgba(0,0,0,.82) 0%, rgba(0,0,0,.42) 45%, transparent 100%)" }} />
                   {isIos ? (
@@ -1136,7 +1136,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         </button>
                       </div>
                     )}
-                    <div className="hg-ios-caption-progress mx-4 mt-2 relative pointer-events-auto" style={{ height: 14, touchAction: "none" }}
+                    <div className="hg-ios-caption-progress hg-ios-seek-target mx-4 mt-2 relative pointer-events-auto" style={{ height: isIos ? 44 : 14, touchAction: "none" }}
                       onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp}>
                       <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[2.5px] rounded-full" style={{ background: "rgba(255,255,255,.3)" }}>
                         <div className="h-full rounded-full bg-white"
@@ -1167,7 +1167,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               {/* 暂停 / 缓冲 */}
               {isActive && paused && !err && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-                  <span className={`hg-play-glyph w-[66px] h-[66px] rounded-full flex items-center justify-center ${isIos ? "" : "backdrop-blur-md"}`}
+                  <span className={`hg-play-glyph ${isIos ? "w-16 h-16" : "w-[66px] h-[66px]"} rounded-full flex items-center justify-center ${isIos ? "" : "backdrop-blur-md"}`}
                     style={isIos ? undefined : { background: "rgba(0,0,0,.55)", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.12)" }}>
                     <IPlayF size={28} className="hg-ink ml-0.5" />
                   </span>
@@ -1224,22 +1224,24 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         <button type="button"
           disabled={holdSpeed}
           onClick={() => { if (speedLock) setSpeedLock(false); else setRate(1); }}
-          className={`hg-speed-indicator absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30
+          className={`hg-speed-indicator ${isIos ? "hg-ios-speed-dismiss" : ""} absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30
             flex items-center gap-2 whitespace-nowrap rounded-full px-4 h-10 text-[12px] font-semibold
             ${holdSpeed ? "pointer-events-none" : "pressable"}
             ${lockArmed || speedLock ? "bg-primary text-on-primary" : "hg-chip-strong"}`}>
+          <span className={isIos ? "hg-ios-speed-dismiss-face" : "contents"}>
           {lockArmed || speedLock ? <ILockF size={16} /> : <IBoltF size={15} />}
           <span>
             {effRate}× {holdSpeed
               ? (lockArmed ? "松手锁定" : "上滑锁定")
               : (speedLock ? "已锁定 · 点按解除" : "倍速 · 点按恢复")}
           </span>
+          </span>
         </button>
       )}
 
       {/* 移动端全屏模式下的进度条（普通模式的进度条在底部灰块里） */}
       {!isDesktop && fs && (
-        <div className="hg-ios-browse-content absolute inset-x-0 z-30 px-4" style={{ bottom: "calc(var(--sab, 0px) + 52px)", height: 22 }}>
+        <div className="hg-ios-browse-content hg-ios-seek-target hg-ios-full-seek absolute inset-x-0 z-30 px-4" style={{ bottom: isIos ? "calc(var(--sab, 0px) + 56px)" : "calc(var(--sab, 0px) + 52px)", height: isIos ? 44 : 22 }}>
           <div className="relative h-full" style={{ touchAction: "none" }}
             onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp}>
             <div className="absolute inset-x-0 bottom-[8px] h-[2.5px] rounded-full" style={{ background: "rgba(255,255,255,.3)" }}>
@@ -1259,11 +1261,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               <ICompress size={18} />
             </button>
           </div>}
-          <div className="hg-ios-browse-content absolute inset-x-0 z-40 flex items-center gap-2 px-4"
+          <div className="hg-ios-browse-content hg-ios-full-actions absolute inset-x-0 z-40 flex items-center gap-2 px-4"
             style={{ bottom: "calc(var(--sab, 0px) + 10px)" }}>
             <button onClick={() => videoRef.current?.toggle()} aria-label={paused ? "播放" : "暂停"}
-              className="hg-play-glyph hg-chip shrink-0 w-9 h-9 rounded-full flex items-center justify-center pressable">
-              {paused ? <IPlayF size={18} /> : <IPauseF size={17} />}
+              className={`hg-play-glyph hg-chip shrink-0 w-9 h-9 rounded-full flex items-center justify-center pressable ${isIos ? "hg-ios-full-action" : ""}`}>
+              <span className={isIos ? "hg-ios-full-action-face" : "contents"}>{paused ? <IPlayF size={18} /> : <IPauseF size={17} />}</span>
             </button>
             <span className="shrink-0 text-[11.5px] font-semibold hg-ink-2 tabular-nums">{fmtTime(time)}</span>
             <button
@@ -1273,8 +1275,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 const i = seq.indexOf(rate);
                 setRate(seq[(i + 1) % seq.length]);
               }}
-              className={`ml-auto shrink-0 flex items-center gap-1 px-2.5 h-8 rounded-full text-[12px] font-bold pressable ${effRate !== 1 ? "bg-primary text-on-primary" : "hg-chip hg-ink-2"}`}>
-              <IBoltF size={12} />{effRate}x
+              className={`ml-auto shrink-0 flex items-center gap-1 px-2.5 h-8 rounded-full text-[12px] font-bold pressable ${isIos ? "hg-ios-full-action" : ""} ${effRate !== 1 ? "bg-primary text-on-primary" : "hg-chip hg-ink-2"}`}>
+              <span className={isIos ? "hg-ios-full-action-face" : "contents"}><IBoltF size={12} />{effRate}x</span>
             </button>
             <span className="shrink-0 text-[11.5px] hg-ink-4 tabular-nums">{fmtTime(duration)}</span>
           </div>
@@ -1395,7 +1397,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       </div>
                       <div className="hg-ios-detail-info-column flex-1 min-w-0">
                         <div className="hg-ios-detail-info min-w-0">
-                          <div className="text-[13.5px] font-bold text-on leading-snug clamp-2">{meta.title}</div>
+                          <div className="hg-detail-title text-[13.5px] leading-snug font-bold text-on clamp-2">{meta.title}</div>
                           <div className="flex items-baseline gap-2 mt-1.5 tabular-nums">
                             {!!meta.score && <span className="text-[12px] font-bold text-amber">{meta.score.toFixed(1)} 分</span>}
                             {episodes.length > 0 && <span className="text-[10.5px] text-mut">共 {episodes.length} 集</span>}
@@ -1411,7 +1413,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
                     {/* 作者 + 关注 */}
                     <div className="hg-ios-content-card hg-ios-content-card-next mt-4 flex items-center gap-2.5 rounded-(--r-md) bg-s2 p-2.5">
-                      <Avatar size={34} name={meta.author} hue={220} />
+                      <Avatar size={isIos ? 32 : 34} name={meta.author} hue={220} />
                       <div className="flex-1 min-w-0">
                         <div className="text-[12.5px] font-semibold text-on truncate">{meta.author}</div>
                         <div className="text-[10px] text-mut">作者</div>
@@ -1431,7 +1433,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     {/* 简介 */}
                     <div className="hg-ios-content-card hg-ios-content-card-next mt-4">
                       <div className="text-[11px] font-semibold text-dim mb-1.5">简介</div>
-                      <p className="text-[11.5px] leading-relaxed text-mut whitespace-pre-wrap">{meta.desc || "暂无简介"}</p>
+                      <p className="hg-reading-body text-[11.5px] leading-relaxed text-mut whitespace-pre-wrap">{meta.desc || "暂无简介"}</p>
                     </div>
                   </div>
                 )}

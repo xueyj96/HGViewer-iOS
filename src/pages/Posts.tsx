@@ -3,7 +3,7 @@ import { appendUniqueById } from "../collections";
 import { api, cover, fmt, isIos, isMobile, LOCAL } from "../api";
 import type { Post } from "../types";
 import { useStore } from "../store";
-import { Img, PageStatus, PlaybackError } from "../components/ui";
+import { Img, LoadingStatus, PageStatus, PlaybackError } from "../components/ui";
 import { IOSBackButton, IOSPageBar } from "../components/IOSPageBar";
 import { browseCoverAttributes, useIOSBrowseCoverMenu } from "../components/IOSCoverMenu";
 import Player from "../components/Player";
@@ -72,7 +72,7 @@ export function PostsPage({ onBack, wide, active }: { onBack: () => void; wide: 
         <div className="hg-ios-compact-header shrink-0 flex items-center gap-2 px-2 bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
           <button onClick={onBack} aria-label="返回" className="hg-ios-back w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={19} /></button>
           <span className="text-[14px] font-bold text-on">黄果吃瓜</span>
-          <span className="text-[10.5px] text-mut ml-1">圈内爆料</span>
+          <span className="hg-meta text-[10.5px] text-mut ml-1">圈内爆料</span>
         </div>
       )}
 
@@ -88,7 +88,7 @@ export function PostsPage({ onBack, wide, active }: { onBack: () => void; wide: 
                 <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
                 <div className="absolute inset-x-0 bottom-0 p-2">
                   <div className="text-[11.5px] font-medium text-white clamp-2 leading-snug tsh">{p.title}</div>
-                  <div className="flex items-center gap-1 mt-1 text-[9.5px] text-white/70">
+                  <div className="flex items-center gap-1 mt-1 hg-meta text-[9.5px] text-white/70">
                     <IFireF size={10} className="text-white/70" />{fmt(p.hot)}
                   </div>
                 </div>
@@ -96,12 +96,12 @@ export function PostsPage({ onBack, wide, active }: { onBack: () => void; wide: 
             ))}
           </div>
         ) : loading || (page === 0 && !failed) ? (
-          <div className="flex justify-center py-12"><div className="w-8 h-8 spinner" /></div>
+          <div className="flex justify-center"><LoadingStatus variant="initial" label="正在加载图文" /></div>
         ) : failed ? <PageStatus title="图文列表加载失败" onRetry={loadMore} />
           : <PageStatus title="暂无吃瓜内容" />}
         {failed && items.length > 0 && !loading && <div className="mt-2"><PageStatus title="更多图文加载失败" onRetry={loadMore} /></div>}
         {!failed && page < pages && <div ref={sentinel} className="h-10" />}
-        {loading && items.length > 0 && <div className="flex justify-center py-2"><div className="w-6 h-6 spinner" /></div>}
+        {loading && items.length > 0 && <div className="flex justify-center"><LoadingStatus variant="tail" label="正在加载更多图文" /></div>}
       </div>
     </div>
   );
@@ -123,7 +123,7 @@ function FullscreenArticleImage({ src, alt, onClose }: { src: string; alt?: stri
       className={`h-full w-full object-contain ${status === "ready" ? "" : "opacity-0"}`}
       onLoad={() => setStatus("ready")} onError={() => setStatus("failed")} onDoubleClick={onClose} />
     {status === "loading" && <div role="status" aria-label="正在加载图片" className="pointer-events-none absolute inset-0 grid place-items-center">
-      <span className="size-9 spinner" />
+      <LoadingStatus variant="media" label="正在加载图片" />
     </div>}
     {status === "failed" && <PlaybackError title="图片暂时无法加载"
       onRetry={() => { setStatus("loading"); setAttempt((value) => value + 1); }} />}
@@ -405,7 +405,7 @@ export function PostDetail({ id: initialId, postIds, nextPostPage, onBack, activ
           </div>
         )}
         {!post ? (!err && (
-          <div className="flex justify-center py-12"><div className="w-8 h-8 spinner" /></div>
+          <div className="flex justify-center"><LoadingStatus variant="initial" label="正在加载图文" /></div>
         )) : (
           <>
             {(post.video_url || post.cover) && <div className="hg-article-video relative w-full bg-black">
@@ -431,21 +431,21 @@ export function PostDetail({ id: initialId, postIds, nextPostPage, onBack, activ
             </div>}
             <div className="hg-ios-browse-content px-4 pt-3.5 bg-bg">
               <div className="hg-ios-content-card">
-                <h1 className="text-[17px] font-bold text-on leading-snug [overflow-wrap:anywhere]">{post.title}</h1>
-                <div className="flex items-center gap-2 mt-2 text-[10.5px] text-mut">
+                <h1 className="hg-post-title text-[17px] font-bold text-on leading-snug [overflow-wrap:anywhere]">{post.title}</h1>
+                <div className="flex items-center gap-2 mt-2 hg-meta text-[10.5px] text-mut">
                   <span>{post.publish_time || post.created_at}</span>
                   <span className="flex items-center gap-1"><IFireF size={10} />{fmt(post.hot)}</span>
                 </div>
                 {!!post.tags?.length && <div className="flex flex-wrap gap-1.5 mt-2.5">
                   {post.tags.slice(0, 8).map((t) => (
-                    <span key={t} className="px-2 py-0.5 rounded-(--r-ctl) bg-s3 text-[10.5px] text-on/75">#{t}</span>
+                    <span key={t} className="hg-content-badge rounded-(--r-ctl) bg-s3 hg-meta text-[10.5px] text-on/75">#{t}</span>
                   ))}
                 </div>}
               </div>
               {post.content && (
                 (isHtml(post.content) || (!strictSecurity && /<[a-z][\s\S]*>/i.test(post.content)))
                   ? <div className="hg-ios-content-card hg-ios-content-card-next article-body mt-3.5" onClick={onContentClick} dangerouslySetInnerHTML={{ __html: safeHtml }} />
-                  : <div className="hg-ios-content-card hg-ios-content-card-next mt-3.5 rounded-(--r-md) bg-s2 p-3.5 text-[12.5px] leading-relaxed text-on/80 whitespace-pre-wrap">{post.content}</div>
+                  : <div className="hg-ios-content-card hg-ios-content-card-next article-body mt-3.5 rounded-(--r-md) bg-s2 p-3.5 text-[12.5px] leading-relaxed text-on/80 whitespace-pre-wrap">{post.content}</div>
               )}
             </div>
           </>

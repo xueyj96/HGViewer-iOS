@@ -54,10 +54,10 @@ export function QualitySheet({ open, quality, selected, onClose, onSelect, onPre
           <div className="text-sm font-semibold text-on">清晰度</div>
           {isIos ? <IOSCloseButton onClose={onClose} /> : <CompactAction tone="neutral" onClick={onClose}>关闭</CompactAction>}
         </div>
-        <p className="mb-2 text-xs text-mut">
+        <p className="hg-ios-quality-description mb-2 text-xs text-mut">
           {levels.length === 1 ? "此视频只有一个清晰度" : current ? `当前播放 ${current.label}` : "自动按网速调整"}
         </p>
-        <div className="max-h-[38vh] overflow-y-auto rounded-(--r-md) bg-s3">
+        <div className={`${isIos ? "hg-ios-quality-options" : "max-h-[38vh]"} overflow-y-auto rounded-(--r-md) bg-s3`}>
           {choices.map((item) => (
             <button type="button" key={item.index} aria-pressed={selected === item.index}
               onClick={() => onSelect(item.index)}

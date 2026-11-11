@@ -18,8 +18,10 @@ export default function AccountCard() {
         </div>
       </div>
       <button onClick={async () => { await logout(); }}
-        className="w-9 h-9 shrink-0 rounded-full bg-s3 flex items-center justify-center text-mut pressable" aria-label="退出登录">
-        <ILogout size={17} />
+        className="hg-ios-account-logout grid size-11 shrink-0 place-items-center text-mut pressable" aria-label="退出登录">
+        <span aria-hidden="true" className="grid size-9 place-items-center rounded-full bg-s3">
+          <ILogout size={17} />
+        </span>
       </button>
     </div>
   ) : (

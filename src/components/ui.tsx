@@ -21,17 +21,27 @@ export function CompactAction({ children, onClick, disabled, tone = "accent", cl
 }
 
 export function EmptyStatus({ children }: { children: React.ReactNode }) {
-  return <p role="status" className="py-8 text-center text-sm text-mut">{children}</p>;
+  return <p role="status" className="hg-empty-status py-8 text-center text-[14px] leading-5 text-mut">{children}</p>;
 }
 
 export function PageStatus({ title, detail, onRetry }: { title: string; detail?: string; onRetry?: () => void }) {
-  return <div className="hg-ios-content-card flex items-center justify-between gap-2 rounded-(--r-md) bg-s2 px-3 py-2 text-sm text-on" role="status">
+  return <div className="hg-ios-content-card hg-page-status flex items-center justify-between gap-2 rounded-(--r-md) bg-s2 px-3 py-2 text-[14px] leading-5 text-on" role="status">
     <div className="min-w-0">
-      <p className="font-medium [overflow-wrap:anywhere]">{title}</p>
-      {detail && <p className="mt-1 text-xs text-mut">{detail}</p>}
+      <p className="hg-page-status-title font-medium [overflow-wrap:anywhere]">{title}</p>
+      {detail && <p className="hg-page-status-detail mt-1 text-[12px] leading-[18px] text-mut">{detail}</p>}
     </div>
     {onRetry && <CompactAction tone="neutral" onClick={onRetry}>重试</CompactAction>}
   </div>;
+}
+
+export function LoadingStatus({ variant = "initial", label = "正在加载" }: {
+  variant?: "initial" | "tail" | "button" | "media";
+  label?: string;
+}) {
+  const size = { initial: 32, tail: 24, button: 16, media: 36 }[variant];
+  return <span role="status" aria-label={label} className={`hg-loading-status hg-loading-${variant} inline-flex shrink-0 items-center justify-center`}>
+    <span aria-hidden="true" className="spinner block shrink-0" style={{ width: size, height: size }} />
+  </span>;
 }
 
 export function PlaybackError({ message, title = "视频暂时无法加载", onRetry, retrying }: {
@@ -56,17 +66,16 @@ function confirmationText(text: string, limit: number) {
   return characters.length <= limit ? text.trim() : `${characters.slice(0, limit - 1).join("")}…`;
 }
 
-export function ConfirmAction({ open, title, message, confirm, cancel = "取消", danger = true, busy, disabled, error, onCancel, onConfirm }: {
-  open: boolean; title: string; message: string; confirm: string; cancel?: string; danger?: boolean;
-  busy?: boolean; disabled?: boolean; error?: string; onCancel: () => void; onConfirm: () => void;
+export function ActionDialog({ open, title, children, confirm, cancel = "取消", danger = false, busy, disabled, onCancel, onConfirm, role = "dialog", describedBy }: {
+  open: boolean; title: string; children: React.ReactNode; confirm: string; cancel?: string; danger?: boolean;
+  role?: "dialog" | "alertdialog"; describedBy?: string;
+  busy?: boolean; disabled?: boolean; onCancel: () => void; onConfirm: () => void;
 }) {
-  const messageId = useId();
   const dismiss = () => { if (!busy) onCancel(); };
-  return <Modal open={open} onClose={dismiss} width={320} height={180} label={title} role="alertdialog" describedBy={messageId}>
+  return <Modal open={open} onClose={dismiss} width={320} height={180} label={title} role={role} describedBy={describedBy}>
     <div className="hg-confirm-content grid h-[180px] grid-rows-[20px_8px_60px_16px_44px] p-4">
       <h2 className="truncate text-center text-sm font-semibold leading-5 text-on">{confirmationText(title, CONFIRM_TEXT_LIMITS.title)}</h2>
-      <p id={messageId} role={error ? "alert" : undefined} aria-label={error || message}
-        className="row-start-3 line-clamp-3 text-left text-[13px] leading-5 text-on">{confirmationText(error || message, CONFIRM_TEXT_LIMITS.message)}</p>
+      <div className="row-start-3 min-h-0 overflow-y-auto overscroll-contain text-left text-[13px] leading-5 text-on">{children}</div>
       <div className="hg-confirm-actions row-start-5 flex flex-wrap items-center justify-between gap-4">
         <button type="button" disabled={busy} aria-label={cancel}
           className="hg-confirm-button inline-flex h-11 w-22 shrink-0 items-center py-1 text-[13px] font-semibold leading-5 pressable disabled:opacity-50"
@@ -79,8 +88,19 @@ export function ConfirmAction({ open, title, message, confirm, cancel = "取消"
   </Modal>;
 }
 
+export function ConfirmAction({ message, error, ...props }: {
+  open: boolean; title: string; message: string; confirm: string; cancel?: string; danger?: boolean;
+  busy?: boolean; disabled?: boolean; error?: string; onCancel: () => void; onConfirm: () => void;
+}) {
+  const messageId = useId();
+  return <ActionDialog {...props} danger={props.danger ?? true} role="alertdialog" describedBy={messageId}>
+    <p id={messageId} role={error ? "alert" : undefined} aria-label={error || message}
+      className="line-clamp-3">{confirmationText(error || message, CONFIRM_TEXT_LIMITS.message)}</p>
+  </ActionDialog>;
+}
+
 /* ——— 头像 ——— */
-export function Avatar({ hue = 250, icon, name, size = 40, ring = false, className = "" }: {
+export function Avatar({ hue = 250, icon, name, size = isIos ? 32 : 40, ring = false, className = "" }: {
   hue?: number; icon?: React.ReactNode; name?: string; size?: number; ring?: boolean; className?: string;
 }) {
   const initial = Array.from(name?.replace(/^@/, "").trim() || "H")[0].toUpperCase();
@@ -101,7 +121,7 @@ const dialogControls = (panel: HTMLElement) =>
   [...panel.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]")]
     .filter((element) => element.tabIndex >= 0 && element.getClientRects().length > 0 && !element.closest("[inert]"));
 
-function useDialogFocus(ref: React.RefObject<HTMLDivElement | null>, enabled: boolean, sharedChrome = false) {
+function useDialogFocus(ref: React.RefObject<HTMLDivElement | null>, enabled: boolean, sharedChrome = false, initialFocus: "panel" | "first-control" = "first-control") {
   useLayoutEffect(() => {
     const panel = ref.current;
     if (!enabled || !panel) return;
@@ -110,20 +130,21 @@ function useDialogFocus(ref: React.RefObject<HTMLDivElement | null>, enabled: bo
     const covered: HTMLElement[] = [];
     for (let layer = panel.parentElement; layer && layer !== scope; layer = layer.parentElement) {
       for (const sibling of layer.parentElement?.children ?? []) {
-        if (sibling !== layer && sibling instanceof HTMLElement && !sibling.inert) {
+        if (sibling !== layer && sibling instanceof HTMLElement && !sibling.inert
+            && !(sharedChrome && sibling.matches(".hg-ios-navigation"))) {
           sibling.inert = true;
           covered.push(sibling);
         }
       }
     }
-    (dialogControls(panel)[0] ?? panel).focus({ preventScroll: true });
+    (initialFocus === "panel" ? panel : dialogControls(panel)[0] ?? panel).focus({ preventScroll: true });
     return () => {
       for (const element of covered) element.inert = false;
       if (previous instanceof HTMLElement && previous.isConnected && !previous.closest("[inert]")) {
         previous.focus({ preventScroll: true });
       }
     };
-  }, [enabled, ref, sharedChrome]);
+  }, [enabled, ref, sharedChrome, initialFocus]);
 }
 
 function keepDialogTab(event: React.KeyboardEvent<HTMLDivElement>) {
@@ -137,9 +158,9 @@ function keepDialogTab(event: React.KeyboardEvent<HTMLDivElement>) {
 }
 
 /* ——— 底部弹层 ——— */
-export function Sheet({ open, onClose, children, z = "z-40", fullPage, label = fullPage, sharedChrome = false, onPresenceChange }: {
+export function Sheet({ open, onClose, children, z = "z-40", fullPage, label = fullPage, sharedChrome = false, onPresenceChange, initialFocus = "first-control" }: {
   open: boolean; onClose: () => void; children: React.ReactNode; z?: string; fullPage?: string; label?: string; sharedChrome?: boolean;
-  onPresenceChange?: (present: boolean) => void;
+  onPresenceChange?: (present: boolean) => void; initialFocus?: "panel" | "first-control";
 }) {
   const [render, setRender] = useState(open);
   const [dragDismissed, setDragDismissed] = useState(false);
@@ -160,7 +181,7 @@ export function Sheet({ open, onClose, children, z = "z-40", fullPage, label = f
     const timer = window.setTimeout(() => setRender(false), 230);
     return () => window.clearTimeout(timer);
   }, [open, onPresenceChange]);
-  useDialogFocus(pageRef, !!label && open && render, sharedChrome);
+  useDialogFocus(pageRef, !!label && open && render, sharedChrome, initialFocus);
   const present = render && (open || !dragDismissed);
   useLayoutEffect(() => onPresenceChange?.(present), [onPresenceChange, present]);
   if (!present) return null;
@@ -200,7 +221,7 @@ export function Modal({ open, onClose, children, width = 340, height, label, rol
   useDialogFocus(modalRef, open && render);
   if (!render) return null;
   return (
-    <div className="absolute inset-0 z-[55] flex items-center justify-center p-6" inert={!open}>
+    <div className={`absolute inset-0 z-[55] flex items-center justify-center ${height === undefined ? "p-6" : "p-4"}`} inert={!open}>
       <div data-dialog-backdrop className={`absolute inset-0 bg-black/65 backdrop-blur-sm ${open ? "a-fade" : "opacity-0 transition-opacity"}`} onClick={onClose} />
       <div ref={modalRef} tabIndex={-1} inert={!open} role={role} aria-label={label} aria-describedby={describedBy} aria-modal="true"
         onKeyDown={(event) => {
@@ -211,7 +232,7 @@ export function Modal({ open, onClose, children, width = 340, height, label, rol
           } else keepDialogTab(event);
         }}
         className={`hg-ios-alert relative bg-s3 rounded-(--r-lg) elev-3 ${open ? "a-scale-in" : "opacity-0 scale-90 transition-all"}`} style={height === undefined ? { width, maxWidth: "100%" }
-          : { width, minWidth: width, maxWidth: width, height, minHeight: height, maxHeight: height }}>
+          : { width, maxWidth: "100%", height, minHeight: height, maxHeight: height }}>
         {children}
       </div>
     </div>
@@ -253,15 +274,15 @@ export function Kbd({ children }: { children: React.ReactNode }) {
 export function ToastHost() {
   const { toasts, dismissToast } = useStore();
   return (
-    <div className="absolute inset-x-0 z-[80] flex flex-col items-center gap-2 pointer-events-none px-6" style={{ bottom: "calc(var(--sab, 0px) + 96px)" }}>
+    <div className="hg-toast-host absolute inset-x-0 z-[80] flex flex-col items-center gap-2 pointer-events-none px-6" style={{ bottom: "calc(var(--sab, 0px) + 96px)" }}>
       {toasts.map((t) => (
-        <div key={t.id} className="a-toast hg-toast pointer-events-auto flex items-center gap-2.5 max-w-full bg-s4/95 backdrop-blur-md rounded-(--r-sm) pl-3.5 pr-4 py-2.5 elev-3">
+        <div key={t.id} className="a-toast hg-toast pointer-events-auto flex items-center gap-2 max-w-[min(360px,calc(100vw-32px))] bg-s4/95 backdrop-blur-md rounded-(--r-sm) px-3 py-2 elev-3">
           {t.icon === "ok" && <ICheck size={16} className="text-mint shrink-0" />}
           {t.icon === "heart" && <IHeartF size={16} className="text-neon shrink-0" />}
           {t.icon === "star" && <IStarF size={16} className="text-amber shrink-0" />}
           {t.icon === "info" && <ISparkF size={15} className="text-cyan shrink-0" />}
-          <span className="text-[13px] text-on truncate">{t.msg}</span>
-          {t.action && <button type="button" className="hg-toast-action min-h-8 shrink-0 text-xs font-semibold text-primary pressable"
+          <span className="min-w-0 flex-1 text-[13px] leading-5 text-on line-clamp-2 [overflow-wrap:anywhere]">{t.msg}</span>
+          {t.action && <button type="button" className="hg-toast-action min-h-11 shrink-0 text-xs font-semibold text-primary pressable"
             onClick={() => { dismissToast(t.id); t.action?.run(); }}>{t.action.label}</button>}
         </div>
       ))}

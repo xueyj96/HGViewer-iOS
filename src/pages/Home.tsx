@@ -6,6 +6,7 @@ import { IOSAccountButton, IOSPageBar, IOSRanksButton } from "../components/IOSP
 import { api, isIos, isMobile } from "../api";
 import type { VideoCard } from "../types";
 import { useStore } from "../store";
+import { LoadingStatus } from "../components/ui";
 import { ISearch, IVol, IVolMute } from "../icons";
 
 export default function Home({ active, bottomInset }: { active: boolean; bottomInset: number }) {
@@ -57,7 +58,7 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
           </div>}
         </div>
       ) : (
-        <div className="absolute inset-0 flex items-center justify-center"><div className="w-9 h-9 spinner" /></div>
+        <div className="absolute inset-0 flex items-center justify-center"><LoadingStatus variant="initial" label="正在加载首页" /></div>
       )}
 
       {lineOpen && <LinePicker open={lineOpen} onClose={() => setLineOpen(false)} />}

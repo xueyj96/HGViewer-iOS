@@ -148,8 +148,8 @@ export default function Player({
       {!playing && !waiting && !errMsg && (
         <button onClick={tapPicture} aria-label="播放"
           className="absolute inset-0 flex items-center justify-center">
-          <span className="hg-play-glyph w-16 h-16 rounded-full bg-black/45 backdrop-blur-sm flex items-center justify-center elev-2 pressable">
-            <IPlayF size={26} className="text-white ml-0.5" />
+          <span className={`hg-play-glyph ${isIos ? "hg-ios-inline-play-face w-14 h-14" : "w-16 h-16"} rounded-full bg-black/45 backdrop-blur-sm flex items-center justify-center elev-2 pressable`}>
+            <IPlayF size={isIos ? 24 : 26} className="text-white ml-0.5" />
           </span>
         </button>
       )}
@@ -163,8 +163,10 @@ export default function Player({
 
       {controls && (!isIos || (!full && !errMsg)) && (
         <div className={`hg-ios-inline-controls hg-ios-browse-content absolute inset-x-0 bottom-0 px-3 pb-2 pt-8 bg-gradient-to-t from-black/80 to-transparent transition-opacity ${isIos ? "" : "opacity-0 group-hover:opacity-100"}`}>
-          <input aria-label="播放进度" type="range" min={0} max={1000} value={Math.round(pct * 10)} onChange={onSeek}
-            className="hg-range w-full" style={{ "--fill": `${pct}%` } as React.CSSProperties} />
+          <div className={isIos ? "hg-ios-article-seek-target relative w-full" : "relative w-full"}>
+            <input aria-label="播放进度" type="range" min={0} max={1000} value={Math.round(pct * 10)} onChange={onSeek}
+              className="hg-range w-full" style={{ "--fill": `${pct}%` } as React.CSSProperties} />
+          </div>
           <div className="flex items-center gap-3 mt-1 text-white">
             <button onClick={toggle} aria-label={playing ? "暂停" : "播放"} className="pressable">
               {playing ? <IPauseF size={16} /> : <IPlayF size={16} />}

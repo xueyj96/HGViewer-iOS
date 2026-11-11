@@ -22,6 +22,8 @@ import ResizeHandles from "./components/ResizeHandles";
 import { useIOSHorizontalInsets } from "./components/useIOSHorizontalInsets";
 import { restoreIOSPlaybackOrientation } from "./components/iosPlaybackOrientation";
 import { WORKSPACE_TABS } from "./workspaceTabs";
+import { IOS_LAYOUT_CHANGE } from "./iosGeometry";
+import CoverActionMenu from "./components/CoverActionMenu";
 
 const MOBILE_TAB_HEIGHT = isIos ? 50 : 40;
 
@@ -134,11 +136,18 @@ function useWorkspaceWidth(initialWide: boolean) {
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const measure = () => setWide(element.clientWidth > 640);
+    const measure = () => {
+      const shell = element.closest<HTMLElement>(".plat-ios");
+      const style = getComputedStyle(shell ?? element);
+      const inset = (name: string) => Number.parseFloat(style.getPropertyValue(name)) || 0;
+      const safeWidth = element.clientWidth - (shell ? inset("--ios-native-safe-left") + inset("--ios-native-safe-right") + 32 : 0);
+      setWide(safeWidth > 640);
+    };
     const observer = new ResizeObserver(measure);
     observer.observe(element);
+    window.addEventListener(IOS_LAYOUT_CHANGE, measure);
     measure();
-    return () => observer.disconnect();
+    return () => { observer.disconnect(); window.removeEventListener(IOS_LAYOUT_CHANGE, measure); };
   }, []);
   return { ref, wide };
 }
@@ -215,7 +224,7 @@ function AppBody() {
     <div className="absolute inset-0 flex bg-canvas">
       <div ref={mainRef} className="relative flex-1 min-w-0 overflow-hidden win-main">
         {isIos ? <IOSNavigation immersive={fs} playbackRoute={episodePlaybackRoute}
-          bottom={<TabBar overPlayback={showingPlayback} />}>{pages}</IOSNavigation>
+          bottom={<TabBar overPlayback={showingPlayback} />}>{pages}<LoginModal /></IOSNavigation>
           : <>{pages}{!fs && !currentPage && <TabBar />}</>}
       </div>
     </div>
@@ -257,12 +266,23 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
 function MobileShell({ children }: { children: React.ReactNode }) {
   const shell = useRef<HTMLDivElement>(null);
   useIOSHorizontalInsets(shell);
+  useEffect(() => {
+    const element = shell.current;
+    const viewport = window.visualViewport;
+    if (!isIos || !element || !viewport) return;
+    const update = () => element.style.setProperty("--ios-viewport-bottom-inset", `${Math.max(0, document.documentElement.clientHeight - viewport.height - viewport.offsetTop)}px`);
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    update();
+    return () => { viewport.removeEventListener("resize", update); viewport.removeEventListener("scroll", update); };
+  }, []);
 
   return (
     <div ref={shell} className={`absolute inset-0 flex flex-col bg-canvas plat-${isIos ? "ios" : "android"}`}
       style={{ "--sat": isIos ? "var(--ios-top-inset)" : "max(env(safe-area-inset-top), 8px)", "--sab": "max(env(safe-area-inset-bottom), 6px)" } as React.CSSProperties}>
       <div className="relative flex-1 min-h-0">
         <AppBody />
+        {isIos && <CoverActionMenu />}
         {children}
       </div>
     </div>
@@ -345,7 +365,7 @@ export default function App() {
   }, []);
 
   if (isMobile) {
-    return <MobileShell><LoginModal /><ToastHost /></MobileShell>;
+    return <MobileShell>{!isIos && <LoginModal />}<ToastHost /></MobileShell>;
   }
   return <><DesktopShell /><LoginModal /><ToastHost /></>;
 }

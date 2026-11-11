@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { finishMotion } from "./finishMotion";
+import { IOS_LAYOUT_CHANGE } from "../iosGeometry";
 
 const TopBarHost = createContext<HTMLElement | null>(null);
 const NavigationScope = createContext<{ active: boolean; account?: ReactNode }>({ active: true });
@@ -13,6 +14,27 @@ export function IOSNavigation({ children, bottom, immersive, playbackRoute }: {
   const [rail, setRail] = useState<PlaybackRail | null>(null);
   const railHost = useRef<HTMLDivElement>(null);
   const railVisible = playbackRoute && rail?.attached === true;
+  useLayoutEffect(() => {
+    const host = railHost.current;
+    if (!host) return;
+    const update = () => {
+      for (const list of host.querySelectorAll<HTMLElement>(".hg-ios-feed-rail, .hg-ios-full-rail")) {
+        if (!window.matchMedia("(orientation: landscape)").matches) { list.style.removeProperty("--hg-rail-columns"); continue; }
+        const style = getComputedStyle(list);
+        const target = Number.parseFloat(style.getPropertyValue("--ios-control-target")) || 44;
+        const gap = Number.parseFloat(style.getPropertyValue("--ios-control-gap")) || 4;
+        const available = Math.max(target, host.clientHeight - (Number.parseFloat(style.top) || 0) - (Number.parseFloat(style.bottom) || 0));
+        const rows = Math.max(1, Math.floor((available + gap) / (target + gap)));
+        const count = list.querySelectorAll(":scope > button").length;
+        list.style.setProperty("--hg-rail-columns", String(Math.max(1, Math.min(3, Math.ceil(count / rows)))));
+      }
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(host);
+    window.addEventListener(IOS_LAYOUT_CHANGE, update);
+    update();
+    return () => { observer.disconnect(); window.removeEventListener(IOS_LAYOUT_CHANGE, update); };
+  }, [rail]);
   useEffect(() => {
     if (railVisible || !rail) return;
     return finishMotion(railHost.current, () => setRail((current) => current === rail ? null : current));

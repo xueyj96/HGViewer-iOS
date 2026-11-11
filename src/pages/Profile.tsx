@@ -8,7 +8,7 @@ import { api, APP_VERSION, fmtTime, isIos, isMobile, platformLabel } from "../ap
 import { useIOSCoverMenu } from "../components/IOSCoverMenu";
 import type { Detail } from "../types";
 import { useStore } from "../store";
-import { EmptyStatus, PageStatus } from "../components/ui";
+import { EmptyStatus, LoadingStatus, PageStatus } from "../components/ui";
 import { IClock, IDownload, ISettings, IStar } from "../icons";
 
 const libraryIcons = { fav: IStar, history: IClock, offline: IDownload };
@@ -203,7 +203,7 @@ export default function Profile({ wide, active }: { wide: boolean; active: boole
               })}
             </ShowCoverGrid>
           )}
-          {loading && <div className="flex justify-center py-4" role="status" aria-label="正在加载资料库"><div className="w-7 h-7 spinner" /></div>}
+          {loading && <div className="flex justify-center"><LoadingStatus variant="tail" label="正在加载资料库" /></div>}
           {!loading && failed && <PageStatus title={cards.length ? "部分作品加载失败" : "作品加载失败"} onRetry={() => retryDetails()} />}
           {!loading && ids.length === 0 && <EmptyStatus>{tab === "fav" ? "还没有收藏" : "还没有观看记录"}</EmptyStatus>}
           {hasMore && <div ref={sentinel} aria-hidden="true" className="h-px" />}

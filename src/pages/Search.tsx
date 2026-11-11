@@ -6,7 +6,7 @@ import { useStore } from "../store";
 import { IOSPageBar } from "../components/IOSPageBar";
 import { useIOSBrowseCoverMenu } from "../components/IOSCoverMenu";
 import { Masonry, RankRow } from "../components/cards";
-import { CompactAction, PageStatus } from "../components/ui";
+import { CompactAction, LoadingStatus, PageStatus } from "../components/ui";
 import { IBack, IClose, IFireF, IRefresh, ISearch, ITrophy } from "../icons";
 
 const HOT_TAGS = ["都市", "逆袭", "古风", "系统", "后宫", "校园", "仙侠", "职场", "大男主", "御姐", "脑洞", "奇幻"];
@@ -160,14 +160,14 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
                 <Masonry videos={items} wide={wide} onOpen={(v) => open(v.id)} />
                 {err && !loading ? <div className="mt-2"><PageStatus title="搜索结果加载失败" onRetry={() => void run(submitted, page + 1)} /></div>
                   : (!isIos || loading || page < pages) && <div className="flex justify-center py-4">
-                  {loading ? <div className="w-6 h-6 spinner" />
+                  {loading ? <LoadingStatus variant="tail" label="正在加载更多搜索结果" />
                     : page < pages ? (
-                      <button onClick={() => run(submitted, page + 1)} className="px-5 h-9 rounded-(--r-ctl) bg-s3 text-[12px] text-on/85 pressable">加载更多</button>
+                      <CompactAction tone="neutral" onClick={() => void run(submitted, page + 1)}>加载更多</CompactAction>
                     ) : !isIos && <span className="text-[10.5px] text-dim">— 已经到底啦 —</span>}
                 </div>}
               </>
             ) : loading ? (
-              <div className="flex justify-center py-12"><div className="w-8 h-8 spinner" /></div>
+              <div className="flex justify-center"><LoadingStatus variant="initial" label="正在搜索" /></div>
             ) : err ? <PageStatus title="搜索失败" onRetry={() => void run(submitted, 1)} />
               : <PageStatus title="没有找到相关内容" detail="换个关键词试试。" />}
           </>
@@ -249,7 +249,7 @@ export function RankPage({ onBack, wide, active }: { onBack: () => void; wide: b
 
       <div ref={scroll} className="hg-ios-browse-content flex-1 scroll-y px-3.5 pt-3 pb-8">
         {loading ? (
-          <div className="flex justify-center py-12"><div className="w-8 h-8 spinner" /></div>
+          <div className="flex justify-center"><LoadingStatus variant="initial" label="正在加载排行榜" /></div>
         ) : items.length ? (
           items.map((it) => (
             <RankRow key={`${it.video_id}-${it.rank}`} item={it} metricMax={max}

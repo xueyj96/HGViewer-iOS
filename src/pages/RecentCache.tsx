@@ -28,7 +28,7 @@ export default function RecentCache({ onBack, active }: { onBack: () => void; ac
     }} />;
 
   return <CachePageFrame title="最近播放缓存" onBack={onBack} overlay={overlay}>
-    <div className="space-y-3">
+    <div className="space-y-2">
       {recent.length > 0 && <section aria-label="缓存信息" className="hg-ios-grouped-list rounded-(--r-md) bg-s2 px-3 py-2">
         <div className="flex items-center justify-between gap-2 text-xs tabular-nums">
           <span className="font-semibold text-on">临时缓存 {recent.length} 集</span>
