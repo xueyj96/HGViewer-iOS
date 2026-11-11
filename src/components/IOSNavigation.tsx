@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { finishMotion } from "./finishMotion";
 import { IOS_LAYOUT_CHANGE } from "../iosGeometry";
+import { useIOSTopBarMotion } from "./useIOSTopBarMotion";
 
 const TopBarHost = createContext<HTMLElement | null>(null);
 const NavigationScope = createContext<{ active: boolean; account?: ReactNode }>({ active: true });
@@ -11,6 +12,7 @@ export function IOSNavigation({ children, bottom, immersive, playbackRoute }: {
   children: ReactNode; bottom: ReactNode; immersive: boolean; playbackRoute: boolean;
 }) {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
+  useIOSTopBarMotion(host);
   const [rail, setRail] = useState<PlaybackRail | null>(null);
   const railHost = useRef<HTMLDivElement>(null);
   const railVisible = playbackRoute && rail?.attached === true;

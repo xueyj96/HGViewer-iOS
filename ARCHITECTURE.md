@@ -52,4 +52,13 @@ HGViewer 用 React 渲染界面，Tauri 负责 WebView 与 Rust 的通信。iOS 
 
 尺寸角色集中在 `src/ios.css`；页面选择输入、内容行、卡片、状态等角色，避免重新定义局部高宽。`reserve/clearance` 提供导航与播放器同一份底部预算，侧栏按可用高度推导列数并保留系统安全区延迟兜底。规范与可复查清单见 `docs/ui-dimensions.md` 和 `docs/ui-dimensions-inventory.json`。
 
-`IOSCoverMenu.ts` 只持有当前可用容器、动作模型和作用域事件路由；`CoverActionMenu.tsx` 负责长按、键盘、Popover/回退层、焦点和安全区定位。原 UIKit 菜单桥已删除，所有封面操作仍由各页面原消费者执行。数量设置保留 HTML select 的原生选值行为，通过可定制 select 的 CSS 支持统一菜单样式，旧引擎保留功能回退。
+`IOSCoverMenu.ts` 只持有当前可用容器、动作模型和作用域事件路由；`CoverActionMenu.tsx` 负责长按、键盘、Popover/回退层、焦点和安全区定位；`coverMenuPreview.ts` 负责只读封面克隆和卡片锚定布局。背景、预览和菜单位于同一manual顶层，关闭后释放克隆；动画退出由幂等completion收敛，旋转或卸载可提前完成。原 UIKit 菜单桥已删除，所有封面操作仍由各页面原消费者执行。数量设置保留 HTML select 的原生选值行为，通过可定制 select 的 CSS 支持统一菜单样式，旧引擎保留功能回退。
+
+
+## 分栏手势与固定导航
+
+`IOSTabSwipe.tsx` 统一六组顶栏分栏：分类、资料库、榜单、频道排序、账号、剧集详情。页面只提供选中索引、提交回调和各栏内容；拖动与回弹期间保留原选中状态，只临时渲染相邻栏，提交后才切换请求与分页。邻栏不可交互、不启动缓存轮询。首栏左边缘继续交给返回手势，其余合法相邻栏优先；滚动容器声明 `pan-y`，分栏忙碌期间不打开长按菜单。
+
+正文 pane 和分段指示器共用一次手势进度及完成时机，顶底栏通过现有导航 host 固定。`useIOSTopBarMotion.ts` 在持久顶栏内只处理变化的内容槽位与背景扩展，不移动导航 host、不缩放文字；减少动态效果时直接完成。宽度或安全区变化取消拖动，单纯键盘高度变化不撤销选中操作。
+
+分栏动画结束后保持终帧和目标pane，直到页面提交新的选中索引，再在layout阶段归零并释放动画；回弹也在邻栏移除后清理。不要在animation finished回调里先重置正文位移，否则React提交前可能绘制旧页。

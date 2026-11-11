@@ -55,7 +55,7 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: 1.1.0
-        CFBundleVersion: "1.1.101"
+        CFBundleVersion: "1.1.106"
     entitlements:
       path: huangguo-client_iOS/huangguo-client_iOS.entitlements
     scheme:

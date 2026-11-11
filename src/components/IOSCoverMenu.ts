@@ -25,7 +25,7 @@ export const COVER_MENU_CHANGE = "hg-cover-menu-change";
 
 /** Resolve only cards belonging to an enabled, visible consumer. No native installer is registered. */
 export function getCoverMenu(card: HTMLElement): CoverMenuTarget | undefined {
-  if (!card.isConnected || card.closest("[inert], [hidden]") || card.matches(":disabled") ||
+  if (!card.isConnected || card.closest('[inert], [hidden], [data-hg-tab-viewport][aria-busy="true"]') || card.matches(":disabled") ||
     !card.getClientRects().length || getComputedStyle(card).visibility !== "visible") return;
   const owner = [...owners].find((item) => item.container.contains(card) && !item.container.closest("[inert]"));
   if (!owner) return;
@@ -83,6 +83,7 @@ export function useIOSCoverMenu(
   history: boolean,
   onAction: (action: MenuAction) => void,
   mode: MenuMode = "covers",
+  identity?: string | number,
 ) {
   const action = useRef(onAction);
   action.current = onAction;
@@ -109,11 +110,11 @@ export function useIOSCoverMenu(
       window.removeEventListener("hg-cover-action", receive);
       window.dispatchEvent(new Event(COVER_MENU_CHANGE));
     };
-  }, [scroll, enabled, history, mode]);
+  }, [scroll, enabled, history, mode, identity]);
 }
 
 
-export function useIOSBrowseCoverMenu(active: boolean, onOpen: (id: number) => void) {
+export function useIOSBrowseCoverMenu(active: boolean, onOpen: (id: number) => void, identity?: string | number) {
   const scroll = useRef<HTMLDivElement>(null);
   const request = useRef(0);
   const { push, toast } = useStore();
@@ -138,6 +139,6 @@ export function useIOSBrowseCoverMenu(active: boolean, onOpen: (id: number) => v
         if (current()) toast("暂时无法读取选集，请稍后重试", "info");
       });
     }
-  }, "browse");
+  }, "browse", identity);
   return scroll;
 }

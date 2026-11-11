@@ -174,7 +174,7 @@ function WorkspaceTabs({ wide, bottomInset, account }: { wide: boolean; bottomIn
     <>
       {render("home", <Home key={lineRevision} active={pageActive && tab === "home"} bottomInset={bottomInset} />)}
       {render("search", <Search key={lineRevision} active={pageActive && tab === "search"} wide={wide} />)}
-      {render("category", <Category key={lineRevision} wide={wide} />)}
+      {render("category", <Category key={lineRevision} wide={wide} active={pageActive && tab === "category"} />)}
       {render("profile", <Profile wide={wide} active={pageActive && tab === "profile"} />)}
     </>
   );

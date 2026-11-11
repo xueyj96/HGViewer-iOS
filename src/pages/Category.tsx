@@ -5,6 +5,7 @@ import type { Post, VideoCard } from "../types";
 import { useStore, type PageInput } from "../store";
 import { IOSPageBar, IOSRanksButton } from "../components/IOSPageBar";
 import { useIOSBrowseCoverMenu } from "../components/IOSCoverMenu";
+import { IOSSwipeSegments, IOSTabPages, useIOSTabSwipe } from "../components/IOSTabSwipe";
 import { Masonry, RowCard } from "../components/cards";
 import { Img, PageStatus } from "../components/ui";
 import { IBack, IBoltF, IChevR, IFileText, IGrid, IPlayF, ITrophy, IUser } from "../icons";
@@ -16,47 +17,45 @@ export const CHANNELS = [
   { cate: "ai-mogai", name: "AI 魔改", desc: "魔改名场面 · 脑洞大开" },
 ] as const;
 
-export default function Category({ wide }: { wide: boolean }) {
-  return isIos ? <IosCategory /> : <CategoryOverview wide={wide} />;
+export default function Category({ wide, active = true }: { wide: boolean; active?: boolean }) {
+  return isIos ? <IosCategory active={active} /> : <CategoryOverview wide={wide} />;
 }
 
-function IosCategory() {
+function IosCategory({ active }: { active: boolean }) {
   const { push } = useStore();
   const [section, setSection] = useState<"频道" | "发现">("频道");
+  const sectionIndex = section === "频道" ? 0 : 1;
+  const tabs = useIOSTabSwipe({ index: sectionIndex, count: 2, onChange: (index) => setSection(index === 0 ? "频道" : "发现"), enabled: isIos && active });
   const icons = [IPlayF, IGrid, IUser, IBoltF];
-  const entries: { label: string; page: PageInput; icon: typeof IGrid }[] = section === "频道"
-    ? CHANNELS.map(({ cate, name }, index) => ({
-      label: name,
-      page: { kind: "channel", cate, name },
-      icon: icons[index],
-    }))
-    : [
-      { label: "排行榜", page: { kind: "ranks" }, icon: ITrophy },
-      { label: "黄果吃瓜", page: { kind: "posts" }, icon: IFileText },
-    ];
 
   return (
     <div className="hg-ios-category absolute inset-0 flex flex-col bg-bg">
       <IOSPageBar label="分类工具" startAction={<IOSRanksButton />}>
-        <div role="group" aria-label="分类内容" className="hg-ios-segments">
-          {(["频道", "发现"] as const).map((option) => (
-            <button key={option} type="button" aria-pressed={section === option} onClick={() => setSection(option)}>
-              {option}
-            </button>
+        <IOSSwipeSegments controller={tabs} label="分类内容">
+          {(["频道", "发现"] as const).map((option, index) => (
+            <button key={option} type="button" aria-pressed={sectionIndex === index} onClick={() => tabs.select(index)}>{option}</button>
           ))}
-        </div>
+        </IOSSwipeSegments>
       </IOSPageBar>
-      <section aria-label={section} className="hg-ios-browse-content flex-1 scroll-y pb-24">
-        <div className="hg-ios-grouped-list">
-          {entries.map(({ label, page, icon: Icon }) => (
-            <button key={label} type="button" onClick={() => push(page)} className="hg-ios-list-row">
-              <span className="hg-ios-list-icon"><Icon size={17} /></span>
-              <span className="min-w-0 flex-1">{label}</span>
-              <IChevR size={15} className="text-dim" />
-            </button>
-          ))}
-        </div>
-      </section>
+      <IOSTabPages controller={tabs}>{(index: number) => {
+        const pageEntries: { label: string; page: PageInput; icon: typeof IGrid }[] = index === 0
+          ? CHANNELS.map(({ cate, name }, i) => ({ label: name, page: { kind: "channel", cate, name }, icon: icons[i] }))
+          : [
+            { label: "排行榜", page: { kind: "ranks" }, icon: ITrophy },
+            { label: "黄果吃瓜", page: { kind: "posts" }, icon: IFileText },
+          ];
+        return <section aria-label={index === 0 ? "频道" : "发现"} className="hg-ios-browse-content flex-1 scroll-y pb-24">
+          <div className="hg-ios-grouped-list">
+            {pageEntries.map(({ label, page, icon: Icon }) => (
+              <button key={label} type="button" onClick={() => push(page)} className="hg-ios-list-row">
+                <span className="hg-ios-list-icon"><Icon size={17} /></span>
+                <span className="min-w-0 flex-1">{label}</span>
+                <IChevR size={15} className="text-dim" />
+              </button>
+            ))}
+          </div>
+        </section>;
+      }}</IOSTabPages>
     </div>
   );
 }
@@ -181,6 +180,9 @@ function CategoryOverview({ wide }: { wide: boolean }) {
 export function ChannelPage({ cate, name, onBack, wide, active }: { cate: string; name: string; onBack: () => void; wide: boolean; active: boolean }) {
   const { push } = useStore();
   const [sort, setSort] = useState<"最新" | "最热" | "高分">("最新");
+  const sortOptions = ["最新", "最热", "高分"] as const;
+  const sortIndex = sortOptions.indexOf(sort);
+  const tabs = useIOSTabSwipe({ index: sortIndex, count: sortOptions.length, onChange: (index) => setSort(sortOptions[index]), enabled: isIos && active });
   const [items, setItems] = useState<VideoCard[]>([]);
   const [page, setPage] = useState(0);
   const [pages, setPages] = useState(1);
@@ -215,7 +217,7 @@ export function ChannelPage({ cate, name, onBack, wide, active }: { cate: string
     io.observe(el);
     return () => io.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pages, err]);
+  }, [page, pages, err, sort]);
 
   const sorted = [...items].sort((a, b) => {
     if (sort === "最热") return (b.hot || 0) - (a.hot || 0);
@@ -223,21 +225,50 @@ export function ChannelPage({ cate, name, onBack, wide, active }: { cate: string
     return b.id - a.id;
   });
 
-  const open = (id: number) => {
-    const index = sorted.findIndex((item) => item.id === id);
-    if (index >= 0) push({ kind: "feed", videoIds: sorted.map((item) => item.id), index, title: name });
+  const open = (id: number, list = sorted) => {
+    const index = list.findIndex((item) => item.id === id);
+    if (index >= 0) push({ kind: "feed", videoIds: list.map((item) => item.id), index, title: name });
   };
-  const scroll = useIOSBrowseCoverMenu(active, open);
+  const scroll = useIOSBrowseCoverMenu(active, open, sort);
 
-  const segments = (
-    <div role="group" aria-label="频道排序" className="hg-ios-segments flex min-w-0 flex-1 gap-2">
-      {(["最新", "最热", "高分"] as const).map((s) => (
-        <button key={s} aria-pressed={sort === s} onClick={() => setSort(s)}
+  const segmentButtons = sortOptions.map((s, index) => (
+        <button key={s} aria-pressed={sortIndex === index} onClick={() => isIos ? tabs.select(index) : setSort(s)}
           className={`px-4 h-8 rounded-(--r-ctl) text-[12px] font-semibold pressable ${sort === s ? "tonal text-on-sec" : "bg-s3 text-mut"}`}
           style={sort === s ? { background: "var(--p-sec)", color: "var(--p-primary)" } : undefined}>{s}</button>
-      ))}
-    </div>
-  );
+  ));
+  const segments = isIos
+    ? <IOSSwipeSegments controller={tabs} label="频道排序">{segmentButtons}</IOSSwipeSegments>
+    : <div role="group" aria-label="频道排序" className="hg-ios-segments flex min-w-0 flex-1 gap-2">{segmentButtons}</div>;
+
+  const renderPane = (index: number, committed: boolean) => {
+    const paneSort = sortOptions[index];
+    const paneItems = [...items].sort((a, b) => {
+      if (paneSort === "最热") return (b.hot || 0) - (a.hot || 0);
+      if (paneSort === "高分") return (b.score || 0) - (a.score || 0);
+      return b.id - a.id;
+    });
+
+    return <div ref={committed ? scroll : undefined} className="hg-ios-browse-content flex-1 scroll-y px-4 pt-3 pb-8">
+      {paneItems.length ? (
+        <Masonry videos={paneItems} wide={wide} onOpen={(v) => { if (committed) open(v.id, paneItems); }} />
+      ) : loading || (page === 0 && !err) ? (
+        <div className="flex justify-center py-10" role="status" aria-label="正在加载频道">
+          <div className="w-8 h-8 spinner" />
+        </div>
+      ) : err ? <PageStatus title="频道加载失败" onRetry={loadMore} />
+        : <PageStatus title="暂无内容" />}
+      {err && paneItems.length > 0 && !loading && <div className="mt-2"><PageStatus title="更多作品加载失败" onRetry={loadMore} /></div>}
+      {committed && !err && page < pages && <div ref={sentinel} className="h-10" />}
+      {loading && paneItems.length > 0 && (
+        <div className="flex justify-center py-3" role="status" aria-label="正在加载更多">
+          <div className="w-6 h-6 spinner" />
+        </div>
+      )}
+      {!loading && page >= pages && paneItems.length > 0 && (
+        <div className="text-center text-[10.5px] text-dim py-3">— 已经到底啦 —</div>
+      )}
+    </div>;
+  };
 
   return (
     <div className="absolute inset-0 bg-bg flex flex-col">
@@ -255,26 +286,7 @@ export function ChannelPage({ cate, name, onBack, wide, active }: { cate: string
         </div>
       )}
 
-      <div ref={scroll} className="hg-ios-browse-content flex-1 scroll-y px-4 pt-3 pb-8">
-        {sorted.length ? (
-          <Masonry videos={sorted} wide={wide} onOpen={(v) => open(v.id)} />
-        ) : loading || (page === 0 && !err) ? (
-          <div className="flex justify-center py-10" role="status" aria-label="正在加载频道">
-            <div className="w-8 h-8 spinner" />
-          </div>
-        ) : err ? <PageStatus title="频道加载失败" onRetry={loadMore} />
-          : <PageStatus title="暂无内容" />}
-        {err && sorted.length > 0 && !loading && <div className="mt-2"><PageStatus title="更多作品加载失败" onRetry={loadMore} /></div>}
-        {!err && page < pages && <div ref={sentinel} className="h-10" />}
-        {loading && sorted.length > 0 && (
-          <div className="flex justify-center py-3" role="status" aria-label="正在加载更多">
-            <div className="w-6 h-6 spinner" />
-          </div>
-        )}
-        {!loading && page >= pages && sorted.length > 0 && (
-          <div className="text-center text-[10.5px] text-dim py-3">— 已经到底啦 —</div>
-        )}
-      </div>
+      {isIos ? <IOSTabPages controller={tabs}>{renderPane}</IOSTabPages> : renderPane(sortIndex, true)}
     </div>
   );
 }

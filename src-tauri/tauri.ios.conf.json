@@ -16,7 +16,7 @@
     "targets": "all",
     "iOS": {
       "minimumSystemVersion": "17.1",
-      "bundleVersion": "1.1.101"
+      "bundleVersion": "1.1.106"
     }
   }
 }

@@ -208,7 +208,8 @@ html.theme-light .plat-ios {
   justify-content: center;
 }
 
-.plat-ios :is(.hg-ios-floating-bar, .hg-ios-floating-bar-anchor) + .scroll-y {
+.plat-ios :is(.hg-ios-floating-bar, .hg-ios-floating-bar-anchor) + .scroll-y,
+.plat-ios :is(.hg-ios-floating-bar, .hg-ios-floating-bar-anchor) + .hg-ios-tab-viewport > .hg-ios-tab-pane > .scroll-y {
   padding-top: var(--ios-header-content-top);
   padding-bottom: var(--ios-navigation-reserve);
   scroll-padding-block: var(--ios-header-content-top) var(--ios-navigation-reserve);
@@ -236,6 +237,8 @@ html.theme-light .plat-ios {
   inherits: true;
   initial-value: white;
 }
+
+@property --ios-panel-extension { syntax: "<length>"; inherits: true; initial-value: 0px; }
 
 .plat-ios .hg-ios-top-bar {
   --ios-top-surface: color-mix(in srgb, var(--p-s1) 90%, transparent);
@@ -266,15 +269,7 @@ html.theme-light .plat-ios {
     transition: --ios-top-surface 200ms ease, --ios-top-border 200ms ease, --ios-top-ink 200ms ease;
   }
 
-  @keyframes hg-ios-top-content-in {
-    from { opacity: .65; }
-    to { opacity: 1; }
-  }
-
-  .plat-ios .hg-ios-top-bar :is(.hg-ios-floating-panel > *, .hg-ios-floating-actions > button > *),
-  .plat-ios .hg-ios-top-bar .hg-ios-segments button[aria-pressed="true"]::before {
-    animation: hg-ios-top-content-in 200ms ease-out;
-  }
+  .plat-ios .hg-ios-swipe-segments button { transition: color 200ms ease; }
 
   @keyframes hg-ios-nav-content-in {
     from { opacity: .55; }
@@ -322,14 +317,15 @@ html.theme-light .plat-ios {
   content: "";
   position: absolute;
   inset: var(--ios-compact-inset) 0;
+  inset-inline-end: var(--ios-panel-extension);
   z-index: -1;
   border-radius: var(--ios-group-radius);
   background: color-mix(in srgb, var(--p-s1) 90%, transparent);
   box-shadow: var(--ios-panel-focus-ring, inset 0 0 0 .5px var(--ios-divider));
 }
 
-.plat-ios .hg-ios-floating-bar-fill-trailing .hg-ios-floating-panel::before {
-  inset-inline-end: calc(-1 * var(--ios-control-target) + var(--ios-compact-inset));
+.plat-ios .hg-ios-floating-bar-fill-trailing .hg-ios-floating-panel {
+  --ios-panel-extension: calc(-1 * var(--ios-control-target) + var(--ios-compact-inset));
 }
 
 .plat-ios .hg-ios-floating-actions {
@@ -503,6 +499,14 @@ html.theme-light .plat-ios {
   border-radius: var(--ios-control-radius);
   background: var(--ios-segment-selected-surface, var(--ios-selected));
 }
+
+/* Only content panes and this indicator move; both navigation hosts stay fixed. */
+.plat-ios .hg-ios-swipe-segments { position: relative; isolation: isolate; }
+.plat-ios .hg-ios-swipe-segments button[aria-pressed="true"]::before { content: none; }
+.plat-ios .hg-ios-swipe-indicator { position: absolute; left: 0; top: var(--ios-segment-selected-inset, var(--ios-compact-inset)); bottom: var(--ios-segment-selected-inset, var(--ios-compact-inset)); z-index: -1; border-radius: var(--ios-control-radius); background: var(--ios-segment-selected-surface, var(--ios-selected)); pointer-events: none; }
+.plat-ios .hg-ios-tab-viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: pan-y; scroll-padding-left: var(--ios-safe-left); scroll-padding-right: var(--ios-safe-right); }
+.plat-ios .hg-ios-tab-pane { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; transform: translate3d(calc(var(--hg-tab-step, 0) * 100% + var(--hg-tab-offset, 0px)),0,0); }
+.plat-ios .hg-ios-tab-pane :is(.scroll-y, [data-keyboard-scroll]) { touch-action: pan-y; }
 
 .plat-ios .hg-ios-floating-panel .hg-ios-segments,
 .plat-ios .hg-ios-settings-appearance > .hg-ios-segments {
@@ -1317,7 +1321,7 @@ html:has(.hg-native-video.is-ready) body,
   pointer-events: none;
 }
 
-/* UIKit previews use the card's resting bounds. */
+/* Lifted previews start from the card's resting bounds. */
 .plat-ios [data-hg-menu-card].pressable:active {
   transform: none;
 }
@@ -1404,7 +1408,10 @@ html:has(.hg-native-video.is-ready) body,
 .plat-ios .hg-ios-settings-row { min-height: var(--ios-row-double); padding-block: 8px; }
 .plat-ios :is(.hg-setting-title, .hg-ios-settings-row > div > div:first-child) { font-size: 13px; line-height: 20px; }
 .plat-ios :is(.hg-setting-detail, .hg-ios-settings-row > div > div:nth-child(2)) { font-size: 11px; line-height: 16px; margin-top: 4px; }
-.plat-ios .hg-ios-settings-row select { min-height: var(--ios-control-target); padding-inline: var(--ios-field-inset); font-size: 14px; line-height: 20px; border-radius: var(--ios-control-radius); }
+.plat-ios .hg-setting-select { position: relative; display: inline-flex; flex-shrink: 0; height: var(--ios-control-target); min-width: 64px; }
+.plat-ios .hg-setting-select::before { content: ""; position: absolute; inset: calc((var(--ios-control-target) - var(--ios-helper-face)) / 2) 0; border-radius: var(--ios-control-radius); background: var(--p-s3); pointer-events: none; }
+.plat-ios .hg-setting-select:has(select:open)::before { background: var(--p-pc); box-shadow: inset 0 0 0 1px var(--p-primary); }
+.plat-ios .hg-ios-settings-row .hg-setting-select select { position: relative; width: 100%; height: var(--ios-control-target); min-height: var(--ios-control-target); padding-inline: 8px; font-size: 14px; line-height: 20px; border: 0; border-radius: var(--ios-control-radius); background: transparent; }
 .plat-ios .hg-ios-cache-action-face { height: var(--ios-helper-face); font-size: 11px; line-height: 16px; padding-inline: 10px; gap: var(--ios-control-gap); }
 .plat-ios .hg-ios-about-page { height: 100%; min-height: 0; padding-top: calc(var(--ios-control-target) + var(--ios-content-gap)); padding-bottom: max(0px, calc(var(--ios-navigation-reserve) - var(--sab))); }
 .plat-ios .hg-ios-about-page > .scroll-y { padding: 0 var(--ios-browse-end) 8px var(--ios-browse-start); }
@@ -1446,20 +1453,43 @@ html:has(.hg-native-video.is-ready) body,
 @supports (appearance: base-select) {
   .plat-ios .hg-ios-settings-row select,
   .plat-ios .hg-ios-settings-row select::picker(select) { appearance: base-select; }
-  .plat-ios .hg-ios-settings-row select::picker(select) { padding: 4px; margin-block: 4px; border: .5px solid var(--ios-divider); border-radius: var(--ios-group-radius); background: var(--p-s1); color: var(--p-on); }
-  .plat-ios .hg-ios-settings-row select option { display: flex; align-items: center; gap: 8px; min-height: var(--ios-control-target); padding-inline: 12px; border-radius: var(--ios-control-radius); font-size: 14px; line-height: 20px; }
+  .plat-ios .hg-ios-settings-row select::picker(select) { padding: var(--ios-control-gap); margin-block: var(--ios-control-gap); border: .5px solid var(--ios-divider); border-radius: var(--ios-group-radius); background: var(--p-s1); color: var(--p-on); }
+  .plat-ios .hg-ios-settings-row select option { display: flex; align-items: center; gap: var(--ios-content-gap); }
   .plat-ios .hg-ios-settings-row select option:checked { color: var(--p-primary); background: var(--p-pc); }
+  .plat-ios .hg-ios-settings-row select option:hover { background: var(--p-s3); }
+  .plat-ios .hg-ios-settings-row select option:checked:hover { background: var(--p-pc); }
+  .plat-ios .hg-ios-settings-row select::picker-icon { color: var(--p-primary); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .plat-ios .hg-setting-select::before { transition: background-color .2s, box-shadow .2s; }
+  @supports (appearance: base-select) {
+    .plat-ios .hg-ios-settings-row select::picker(select) { opacity: 0; transform: translateY(-4px); transition-property: opacity, transform, display, overlay; transition-duration: .2s; transition-behavior: allow-discrete; }
+    .plat-ios .hg-ios-settings-row select:open::picker(select) { opacity: 1; transform: translateY(0); }
+    .plat-ios .hg-ios-settings-row select::picker-icon { transition: rotate .2s; }
+    .plat-ios .hg-ios-settings-row select:open::picker-icon { rotate: 180deg; }
+    @starting-style {
+      .plat-ios .hg-ios-settings-row select:open::picker(select) { opacity: 0; transform: translateY(-4px); }
+    }
+  }
 }
 
 /* Shared action-list appearance, independent from UIKit's menu surface. */
-.plat-ios .hg-cover-action-menu { padding: 4px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; border: .5px solid var(--ios-divider); border-radius: var(--ios-group-radius); background: var(--p-s1); color: var(--p-on); box-shadow: 0 8px 28px rgba(0,0,0,.24); }
-.plat-ios .hg-cover-action-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--ios-control-target); padding: 8px 12px; border: 0; border-radius: var(--ios-control-radius); background: transparent; color: var(--p-on); text-align: left; font-size: 14px; line-height: 20px; }
+.plat-ios :is(.hg-cover-action-item, .hg-ios-settings-row select option) { box-sizing: border-box; height: var(--ios-control-target); min-height: var(--ios-control-target); flex-shrink: 0; padding: 0 var(--ios-row-inset); border-radius: var(--ios-control-radius); font-family: inherit; font-weight: 400; font-size: var(--ios-font-body); line-height: var(--ios-line-body); white-space: nowrap; }
+.plat-ios .hg-cover-menu-layer { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; overflow: hidden; background: transparent; color: var(--p-on); z-index: 200; }
+.plat-ios .hg-cover-menu-layer::backdrop { background: transparent; }
+.plat-ios .hg-cover-menu-backdrop { position: absolute; inset: 0; background: rgb(0 0 0 / .4); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+.plat-ios .hg-cover-menu-preview { position: fixed; pointer-events: none; transform-origin: 0 0; filter: drop-shadow(0 8px 16px rgb(0 0 0 / .3)); }
+.plat-ios .hg-cover-action-menu { padding: var(--ios-control-gap); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; border: .5px solid var(--ios-divider); border-radius: var(--ios-group-radius); background: var(--p-s1); color: var(--p-on); box-shadow: 0 8px 28px rgba(0,0,0,.24); }
+.plat-ios .hg-cover-action-item { display: flex; align-items: center; gap: var(--ios-content-gap); width: 100%; border: 0; background: transparent; color: var(--p-on); text-align: left; }
 .plat-ios .hg-cover-action-item:focus-visible { outline: 2px solid var(--p-primary); outline-offset: -2px; }
 .plat-ios .hg-cover-action-item:active { background: var(--p-s3); }
 .plat-ios .hg-cover-action-item[data-destructive="true"] { color: var(--p-danger, #ff697c); }
 .plat-ios .hg-cover-action-item:disabled { opacity: .4; }
-.plat-ios .hg-cover-action-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.plat-ios .hg-cover-action-hint { font-size: 11px; line-height: 16px; color: var(--p-mut); }
+.plat-ios .hg-cover-action-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plat-ios .hg-cover-action-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ios-font-meta); line-height: var(--ios-line-meta); color: var(--p-mut); }
+.plat-ios .hg-cover-action-item[data-has-hint] { flex-direction: column; align-items: stretch; justify-content: center; gap: 0; padding-block: var(--ios-control-gap); }
+.plat-ios .hg-cover-action-item[data-has-hint] .hg-cover-action-label { flex: none; }
 
 .plat-ios :where(.hg-meta) { font-size: var(--ios-font-meta); line-height: var(--ios-line-meta); }
 .plat-ios .article-body { max-width: 640px; margin-inline: auto; }

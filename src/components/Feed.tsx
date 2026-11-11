@@ -7,6 +7,7 @@ import { Avatar, CompactAction, Img, PlaybackError, Sheet } from "./ui";
 import VideoSurface, { type VideoHandle } from "./VideoSurface";
 import IOSVideoSurface, { preloadIOSPlayback } from "./IOSVideoSurface";
 import { IOSPageBar } from "./IOSPageBar";
+import { IOSTabPages, IOSSwipeSegments, useIOSTabSwipe } from "./IOSTabSwipe";
 import { useIOSPlaybackRail } from "./IOSNavigation";
 import { usePlaybackTap } from "./usePlaybackTap";
 import { edgeSwipeSide } from "./edgeSwipe";
@@ -98,6 +99,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (activeDetailPanel) lastDetailPanel.current = activeDetailPanel;
   }, [activeDetailPanel]);
   const detailPanel = activeDetailPanel ?? lastDetailPanel.current;
+  const detailTabs = useIOSTabSwipe({ index: detailPanel === "episodes" ? 1 : 0, count: 2,
+    onChange: (index) => setPanel(index === 1 ? "episodes" : "detail"),
+    enabled: isIos && active && !offlineItems && activeDetailPanel !== null });
   const cachedEpisodesPage = isIos && !!offlineItems && detailPanel === "episodes";
   const fullDetails = isIos;
   const fullPanel = isIos && (panel === "comments" || activeDetailPanel !== null);
@@ -948,6 +952,81 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     return <div className="absolute inset-0 bg-black flex items-center justify-center"><div className="w-9 h-9 spinner" /></div>;
   }
 
+  const renderDetailContent = (showEpisodes: boolean) => (
+              <div className="flex min-h-0 flex-1 flex-col">
+                {showEpisodes ? (
+                  <EpisodesPanel bare cachedOnly={cachedEpisodesPage} sortInHeader={fullDetails}
+                    videoId={curId} episodes={episodes} current={curEp} onPick={pickEp} onCache={fullDetails ? undefined : openCache}
+                    descending={descending} onSort={toggleEpisodeOrder} onClose={() => setPanel(null)} />
+                ) : isIos && offlineItems ? (
+                  <div className="hg-ios-browse-content min-h-0 scroll-y pb-5">
+                    <section aria-label="缓存信息" className="hg-ios-content-card flex items-center gap-2">
+                      {offlineCoverIds?.includes(curId) && (
+                        <div className="hg-ios-detail-cover relative aspect-[3/4] shrink-0 overflow-hidden rounded-(--r-sm) bg-s3">
+                          <Img key={curId} src={offlineCover(curId)} raw eager />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-sm font-semibold leading-snug text-on [overflow-wrap:anywhere]">{meta.title}</h3>
+                        <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs tabular-nums text-mut">
+                          <span>已缓存 {episodes.length} 集</span>
+                          <span>{cacheSize(cachedShow?.reduce((sum, item) => sum + item.bytes, 0) ?? 0)}</span>
+                        </p>
+                      </div>
+                    </section>
+                  </div>
+                ) : (
+                  <div className="hg-ios-browse-content min-h-0 scroll-y px-4 pb-5">
+                    {/* 封面 / 标题 / 评分 / 数据 */}
+                    <div className="hg-ios-content-card hg-ios-detail-overview flex gap-3">
+                      <div className="hg-ios-detail-cover relative w-[84px] shrink-0 rounded-(--r-sm) overflow-hidden bg-s3" style={{ aspectRatio: "3 / 4" }}>
+                        <Img src={meta.cover} />
+                      </div>
+                      <div className="hg-ios-detail-info-column flex-1 min-w-0">
+                        <div className="hg-ios-detail-info min-w-0">
+                          <div className="hg-detail-title text-[13.5px] leading-snug font-bold text-on clamp-2">{meta.title}</div>
+                          <div className="flex items-baseline gap-2 mt-1.5 tabular-nums">
+                            {!!meta.score && <span className="text-[12px] font-bold text-amber">{meta.score.toFixed(1)} 分</span>}
+                            {episodes.length > 0 && <span className="text-[10.5px] text-mut">共 {episodes.length} 集</span>}
+                          </div>
+                        </div>
+                        <div className="hg-ios-detail-metrics flex gap-3 mt-2 text-[10.5px] text-mut tabular-nums">
+                          {([["点赞", meta.like], ["收藏", meta.collect], ["评论", meta.comment]] as const).map(([label, value]) => (
+                            <span key={label}>{label} <b className="font-semibold text-on">{fmt(value)}</b></span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 作者 + 关注 */}
+                    <div className="hg-ios-content-card hg-ios-content-card-next mt-4 flex items-center gap-2.5 rounded-(--r-md) bg-s2 p-2.5">
+                      <Avatar size={isIos ? 32 : 34} name={meta.author} hue={220} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[12.5px] font-semibold text-on truncate">{meta.author}</div>
+                        <div className="text-[10px] text-mut">作者</div>
+                      </div>
+                      {meta.authorId > 0 && (isIos ? (
+                        <CompactAction className="hg-ios-detail-follow" tone={store.follows.includes(meta.authorId) ? "neutral" : "accent"} onClick={onFollow}>
+                          {store.follows.includes(meta.authorId) ? "已关注" : "关注"}
+                        </CompactAction>
+                      ) : (
+                        <button onClick={onFollow}
+                          className={`h-7 px-3 rounded-full text-[11px] font-semibold pressable ${store.follows.includes(meta.authorId) ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
+                          {store.follows.includes(meta.authorId) ? "已关注" : "+ 关注"}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* 简介 */}
+                    <div className="hg-ios-content-card hg-ios-content-card-next mt-4">
+                      <div className="text-[11px] font-semibold text-dim mb-1.5">简介</div>
+                      <p className="hg-reading-body text-[11.5px] leading-relaxed text-mut whitespace-pre-wrap">{meta.desc || "暂无简介"}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+  );
+
   return (
     <div
       className={`hg-player-ui absolute inset-0 overflow-hidden bg-black player-root ${isDesktop ? "player-surface" : ""} ${theater ? "is-theater" : ""} ${rotated ? "fs-landscape" : ""} ${isDesktop && idle ? "is-idle" : ""} ${isIos && active && clear && !fullPanel ? "is-clear" : ""}`}
@@ -1309,11 +1388,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               {cachedEpisodesPage ? "已缓存分集" : "离线剧集详情"}
             </h2>
           ) : (
-            <div role="group" aria-label="详情与选集" className="hg-ios-segments">
-              {([["detail", "详情"], ["episodes", "选集"]] as const).map(([key, label]) => (
-                <button type="button" key={key} aria-pressed={detailPanel === key} onClick={() => setPanel(key)}>{label}</button>
+            <IOSSwipeSegments controller={detailTabs} label="详情与选集">
+              {([["detail", "详情"], ["episodes", "选集"]] as const).map(([key, label], index) => (
+                <button type="button" key={key} aria-pressed={detailPanel === key} onClick={() => detailTabs.select(index)}>{label}</button>
               ))}
-            </div>
+            </IOSSwipeSegments>
           )}
         </IOSPageBar>
       )}
@@ -1366,78 +1445,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </button>
               </div>}
 
-              <div className="flex min-h-0 flex-1 flex-col">
-                {detailPanel === "episodes" ? (
-                  <EpisodesPanel bare cachedOnly={cachedEpisodesPage} sortInHeader={fullDetails}
-                    videoId={curId} episodes={episodes} current={curEp} onPick={pickEp} onCache={fullDetails ? undefined : openCache}
-                    descending={descending} onSort={toggleEpisodeOrder} onClose={() => setPanel(null)} />
-                ) : isIos && offlineItems ? (
-                  <div className="hg-ios-browse-content min-h-0 scroll-y pb-5">
-                    <section aria-label="缓存信息" className="hg-ios-content-card flex items-center gap-2">
-                      {offlineCoverIds?.includes(curId) && (
-                        <div className="hg-ios-detail-cover relative aspect-[3/4] shrink-0 overflow-hidden rounded-(--r-sm) bg-s3">
-                          <Img key={curId} src={offlineCover(curId)} raw eager />
-                        </div>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-sm font-semibold leading-snug text-on [overflow-wrap:anywhere]">{meta.title}</h3>
-                        <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs tabular-nums text-mut">
-                          <span>已缓存 {episodes.length} 集</span>
-                          <span>{cacheSize(cachedShow?.reduce((sum, item) => sum + item.bytes, 0) ?? 0)}</span>
-                        </p>
-                      </div>
-                    </section>
-                  </div>
-                ) : (
-                  <div className="hg-ios-browse-content min-h-0 scroll-y px-4 pb-5">
-                    {/* 封面 / 标题 / 评分 / 数据 */}
-                    <div className="hg-ios-content-card hg-ios-detail-overview flex gap-3">
-                      <div className="hg-ios-detail-cover relative w-[84px] shrink-0 rounded-(--r-sm) overflow-hidden bg-s3" style={{ aspectRatio: "3 / 4" }}>
-                        <Img src={meta.cover} />
-                      </div>
-                      <div className="hg-ios-detail-info-column flex-1 min-w-0">
-                        <div className="hg-ios-detail-info min-w-0">
-                          <div className="hg-detail-title text-[13.5px] leading-snug font-bold text-on clamp-2">{meta.title}</div>
-                          <div className="flex items-baseline gap-2 mt-1.5 tabular-nums">
-                            {!!meta.score && <span className="text-[12px] font-bold text-amber">{meta.score.toFixed(1)} 分</span>}
-                            {episodes.length > 0 && <span className="text-[10.5px] text-mut">共 {episodes.length} 集</span>}
-                          </div>
-                        </div>
-                        <div className="hg-ios-detail-metrics flex gap-3 mt-2 text-[10.5px] text-mut tabular-nums">
-                          {([["点赞", meta.like], ["收藏", meta.collect], ["评论", meta.comment]] as const).map(([label, value]) => (
-                            <span key={label}>{label} <b className="font-semibold text-on">{fmt(value)}</b></span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+              {isIos && !offlineItems ? <IOSTabPages controller={detailTabs}>
+                {(index) => renderDetailContent(index === 1)}
+              </IOSTabPages> : renderDetailContent(detailPanel === "episodes")}
 
-                    {/* 作者 + 关注 */}
-                    <div className="hg-ios-content-card hg-ios-content-card-next mt-4 flex items-center gap-2.5 rounded-(--r-md) bg-s2 p-2.5">
-                      <Avatar size={isIos ? 32 : 34} name={meta.author} hue={220} />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[12.5px] font-semibold text-on truncate">{meta.author}</div>
-                        <div className="text-[10px] text-mut">作者</div>
-                      </div>
-                      {meta.authorId > 0 && (isIos ? (
-                        <CompactAction className="hg-ios-detail-follow" tone={store.follows.includes(meta.authorId) ? "neutral" : "accent"} onClick={onFollow}>
-                          {store.follows.includes(meta.authorId) ? "已关注" : "关注"}
-                        </CompactAction>
-                      ) : (
-                        <button onClick={onFollow}
-                          className={`h-7 px-3 rounded-full text-[11px] font-semibold pressable ${store.follows.includes(meta.authorId) ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
-                          {store.follows.includes(meta.authorId) ? "已关注" : "+ 关注"}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* 简介 */}
-                    <div className="hg-ios-content-card hg-ios-content-card-next mt-4">
-                      <div className="text-[11px] font-semibold text-dim mb-1.5">简介</div>
-                      <p className="hg-reading-body text-[11.5px] leading-relaxed text-mut whitespace-pre-wrap">{meta.desc || "暂无简介"}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
           </Sheet>
         </>

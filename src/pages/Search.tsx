@@ -5,6 +5,7 @@ import type { RankItem, VideoCard } from "../types";
 import { useStore } from "../store";
 import { IOSPageBar } from "../components/IOSPageBar";
 import { useIOSBrowseCoverMenu } from "../components/IOSCoverMenu";
+import { IOSSwipeSegments, IOSTabPages, useIOSTabSwipe } from "../components/IOSTabSwipe";
 import { Masonry, RankRow } from "../components/cards";
 import { CompactAction, LoadingStatus, PageStatus } from "../components/ui";
 import { IBack, IClose, IFireF, IRefresh, ISearch, ITrophy } from "../icons";
@@ -187,17 +188,25 @@ const RANK_TABS = [
 export function RankPage({ onBack, wide, active }: { onBack: () => void; wide: boolean; active: boolean }) {
   const { push } = useStore();
   const [tab, setTab] = useState<"hot" | "recommend" | "potential">("hot");
+  const rankIndex = RANK_TABS.findIndex((item) => item.k === tab);
+  const tabs = useIOSTabSwipe({ index: rankIndex, count: RANK_TABS.length, onChange: (index) => changeRank(RANK_TABS[index].k), enabled: isIos && active });
   const [items, setItems] = useState<RankItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
+  const changeRank = (next: typeof tab) => {
+    if (tab === next) return;
+    setItems([]);
+    setLoading(true);
+    setTab(next);
+  };
 
   const meta = RANK_TABS.find((t) => t.k === tab)!;
   const open = (id: number) => {
     const index = items.findIndex((item) => item.video_id === id);
     if (index >= 0) push({ kind: "feed", videoIds: items.map((item) => item.video_id), index, title: meta.label });
   };
-  const scroll = useIOSBrowseCoverMenu(active, open);
+  const scroll = useIOSBrowseCoverMenu(active, open, tab);
 
   useEffect(() => {
     let alive = true;
@@ -212,19 +221,31 @@ export function RankPage({ onBack, wide, active }: { onBack: () => void; wide: b
 
   const max = Math.max(1, ...items.map((x) => x.metric_value || 0));
 
-  const segments = (
-    <div role="group" aria-label="榜单类型" className="hg-ios-segments flex min-w-0 flex-1 bg-s3 rounded-(--r-ctl) p-1">
-      {RANK_TABS.map((t) => (
-        <button key={t.k} aria-pressed={tab === t.k} onClick={() => {
-            if (tab === t.k) return;
-            setItems([]);
-            setLoading(true);
-            setTab(t.k);
-          }}
+  const segmentButtons = RANK_TABS.map((t, index) => (
+        <button key={t.k} aria-pressed={rankIndex === index} onClick={() => isIos ? tabs.select(index) : changeRank(t.k)}
           className={`flex-1 h-8 rounded-(--r-ctl) text-[12px] font-semibold transition-all ${tab === t.k ? "tonal elev-1" : "text-mut"}`}>{t.label}</button>
-      ))}
-    </div>
-  );
+  ));
+  const segments = isIos
+    ? <IOSSwipeSegments controller={tabs} label="榜单类型">{segmentButtons}</IOSSwipeSegments>
+    : <div role="group" aria-label="榜单类型" className="hg-ios-segments flex min-w-0 flex-1 bg-s3 rounded-(--r-ctl) p-1">{segmentButtons}</div>;
+
+  const renderPane = (index: number, committed: boolean) => {
+    const isCurrent = index === rankIndex;
+    return <div ref={committed ? scroll : undefined} className="hg-ios-browse-content flex-1 scroll-y px-3.5 pt-3 pb-8">
+      {!isCurrent ? (
+        <div className="flex justify-center"><LoadingStatus variant="initial" label="切换榜单后加载" /></div>
+      ) : loading ? (
+        <div className="flex justify-center"><LoadingStatus variant="initial" label="正在加载排行榜" /></div>
+      ) : items.length ? (
+        items.map((it) => (
+          <RankRow key={`${it.video_id}-${it.rank}`} item={it} metricMax={max}
+            onOpen={() => open(it.video_id)} />
+        ))
+      ) : failed ? <PageStatus title="榜单加载失败" onRetry={() => setRetry((n) => n + 1)} />
+        : <PageStatus title="榜单暂时为空" />}
+      {wide && <div className="h-2" />}
+    </div>;
+  };
 
   return (
     <div className="absolute inset-0 bg-bg flex flex-col">
@@ -247,18 +268,7 @@ export function RankPage({ onBack, wide, active }: { onBack: () => void; wide: b
         </div>
       )}
 
-      <div ref={scroll} className="hg-ios-browse-content flex-1 scroll-y px-3.5 pt-3 pb-8">
-        {loading ? (
-          <div className="flex justify-center"><LoadingStatus variant="initial" label="正在加载排行榜" /></div>
-        ) : items.length ? (
-          items.map((it) => (
-            <RankRow key={`${it.video_id}-${it.rank}`} item={it} metricMax={max}
-              onOpen={() => open(it.video_id)} />
-          ))
-        ) : failed ? <PageStatus title="榜单加载失败" onRetry={() => setRetry((n) => n + 1)} />
-          : <PageStatus title="榜单暂时为空" />}
-        {wide && <div className="h-2" />}
-      </div>
+      {isIos ? <IOSTabPages controller={tabs}>{renderPane}</IOSTabPages> : renderPane(rankIndex, true)}
     </div>
   );
 }

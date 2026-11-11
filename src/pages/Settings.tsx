@@ -26,12 +26,14 @@ function DownloadSettingRow({ label, description, unit, icon, value, disabled, r
       <span className="hg-setting-title block text-[12.5px] text-on">{label}</span>
       <span className="hg-setting-detail block text-[10.5px] text-mut">{description}</span>
     </span>
+    <span className="hg-setting-select">
     <select aria-label={label} value={value ?? ""} disabled={disabled || value === undefined}
       className="min-h-11 rounded-(--r-ctl) bg-s3 px-3 text-sm font-medium text-primary"
       onChange={(event) => onChange(Number(event.target.value))}>
       {value === undefined && <option value="">{readFailed ? "读取失败" : "读取中"}</option>}
       {[1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}{unit && ` ${unit}`}</option>)}
     </select>
+    </span>
   </label>;
 }
 

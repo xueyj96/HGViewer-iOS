@@ -2,14 +2,14 @@
   "schema_version": 1,
   "app": "HGViewer/HGhub iOS",
   "as_of": "2026-11-11",
-  "source_version": "1.1.101",
+  "source_version": "1.1.106",
   "document_state": "selected and implemented; final production frontend regression and native build verified; delivery tracked separately",
   "scope": "all page entrypoints and shared UI families; iPhone standards, desktop family kept separately",
   "count_semantics": "records count control families, not rendered instances; file counts are coverage inventory only",
   "source_files": [
     {
       "path": "src/App.tsx",
-      "sha256": "088b81833395dca98cc632fc5b6e645b82060b32d1feff1c1e3d1e7a1e8e23f8"
+      "sha256": "d3f8f12acbb49d713e12a1807dd7f278962c8644152b0135a27615d86acc51f4"
     },
     {
       "path": "src/components/AccountCard.tsx",
@@ -21,7 +21,7 @@
     },
     {
       "path": "src/components/CoverActionMenu.tsx",
-      "sha256": "f0e25052ea77d579087292c450701261a4792eb8ae1a8a93df73fc0503425480"
+      "sha256": "4fb97a18db84ada453f14cf644433ded989d8260706c64ba395bf79f2044a177"
     },
     {
       "path": "src/components/DesktopChrome.tsx",
@@ -33,7 +33,7 @@
     },
     {
       "path": "src/components/Feed.tsx",
-      "sha256": "819204990f16aedf5e09ae53a2f188d22f403956b057c45dac27ff107c7f60fe"
+      "sha256": "1e1b1c35f596f576156faa98f41ba9de595b1551a878bf41c5e40fede5326bdd"
     },
     {
       "path": "src/components/IOSChannelBackFrame.tsx",
@@ -41,11 +41,11 @@
     },
     {
       "path": "src/components/IOSCoverMenu.ts",
-      "sha256": "910b62ae35d0c59a480c7425333671ffa6949db765a9e1365ca8ac9cd1c82a9b"
+      "sha256": "acdc0ffe737559730c7593f8784b43c7f8a2602693364cd13b5701c235923851"
     },
     {
       "path": "src/components/IOSNavigation.tsx",
-      "sha256": "850f815ed894f6db983e3e38b97db2602a856953f2e1ea25f53336a210eff951"
+      "sha256": "64d66a917be019f6decdb34f0447c8fabc9ef4b5b064e99c1f008fad2398ddca"
     },
     {
       "path": "src/components/IOSPageBar.tsx",
@@ -69,7 +69,7 @@
     },
     {
       "path": "src/components/LoginModal.tsx",
-      "sha256": "2d09de1c54af79fc4546742be30ba034006107f5fcb1236db21839360076f3a7"
+      "sha256": "3cc9b65111dc0e378a909a7fc3f1db09eb2c02f2aa08cc8fcc1377531f2074ab"
     },
     {
       "path": "src/components/Panels.tsx",
@@ -121,11 +121,11 @@
     },
     {
       "path": "src/ios.css",
-      "sha256": "6c22a51ac52d93a7a1c3234868c71307658332d1e030d2ccfdb1d1689752e765"
+      "sha256": "971e9b389ad7d4d0ba7bc66b6c8ad2737d40719d5cd975599e24b8b0fa24358f"
     },
     {
       "path": "src/pages/Category.tsx",
-      "sha256": "d43640f1d8c5fb33b3460405b3ba4ce1c372c4455ecb99186f374a0638f32b5c"
+      "sha256": "69badaf39431589f41353a040343d9436f86eee3616bb5cfb1d16fd555a08204"
     },
     {
       "path": "src/pages/Home.tsx",
@@ -141,7 +141,7 @@
     },
     {
       "path": "src/pages/Profile.tsx",
-      "sha256": "e7a73cba2f4a595690cfe5df9221b55e897364295d67ae6789273e0354bb5e15"
+      "sha256": "f7f49345a1ad4539a2546bb7feed53eae6af75a2daad8bbf8c3a4450b6f5e9a7"
     },
     {
       "path": "src/pages/RecentCache.tsx",
@@ -149,11 +149,11 @@
     },
     {
       "path": "src/pages/Search.tsx",
-      "sha256": "ccba320fe1fc0dda19082e0995b9823f6f1821b472d6596248364480bbb7fcfe"
+      "sha256": "f8de71e89bfce27d7e8437003e0a51ee34b47d3b2f69129f39c48a71938462f8"
     },
     {
       "path": "src/pages/Settings.tsx",
-      "sha256": "7e81e6eda752aa68a98f66b065599536fad0825d6384455813f1c2f6462e48b7"
+      "sha256": "8ffccea23ddc19bac0fc80b1db04a14f21a083cbcd8da8a67582b4199a6d8f24"
     },
     {
       "path": "src/workspaceTabs.ts",
@@ -166,6 +166,18 @@
     {
       "path": "src-tauri/src/lib.rs",
       "sha256": "b95c493cb637ca1ea99704ebe0d92a8af1e41727bec4dd4e82054f93a524e7f9"
+    },
+    {
+      "path": "src/components/coverMenuPreview.ts",
+      "sha256": "693ae4f8ce5a30c17e2a819bf0a670332c9274093fb0840f504c124190638ba1"
+    },
+    {
+      "path": "src/components/IOSTabSwipe.tsx",
+      "sha256": "f65b9cd385f5363eeec6452169f212e3fe5b44c5c12f8289c7d31fbfd7a6e598"
+    },
+    {
+      "path": "src/components/useIOSTopBarMotion.ts",
+      "sha256": "7397bfffd27cc98c41e4c3d6931fb2a6336cbaf4cd83db9b8657933628a0ea4f"
     }
   ],
   "cross_app_policy": "share taxonomy/evidence fields only; each app owns its numbers; no message sent to other sessions",
@@ -428,7 +440,7 @@
       },
       "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
       "baseline_current": "44点击/36组框/28选中面；13字号；4间隙",
-      "current": "44点击/36组框/28选中；13字、间4，顶栏等宽动作位",
+      "current": "44点击/36组框/28选中；13字、间4，顶栏等宽动作位；顶栏分栏IOSTabSwipe统一边缘跟手/正文与thumb同步，提交200/回弹170，固定导航host；六组消费者",
       "selected_standard": "44点击/36组框/28选中；13字、间4，顶栏等宽动作位",
       "baseline_runtime_measurements": [
         {
@@ -726,8 +738,8 @@
       },
       "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
       "baseline_current": "67×44当前渲染、R4、14字；整块背景44",
-      "current": "原select和4项onChange保留；44入口；支持base-select时popupR8/内4/行44/横12/字14/20/min宽128",
-      "selected_standard": "原select和4项onChange保留；44入口；支持base-select时popupR8/内4/行44/横12/字14/20/min宽128",
+      "current": "原select和4项onChange保留；44点击/28可见/R4/min宽64入口；支持base-select时popupR8/内4/行44/横12/字14/20/min宽128；open控件强调/选中态，picker与箭头200ms，reduce跳过，旧WebKit系统反馈；选项共享固定高44/横12/R4/14字20行高400字重；hint11/16与上下4仍容纳44",
+      "selected_standard": "原select和4项onChange保留；44点击/28可见/R4/min宽64入口；支持base-select时popupR8/内4/行44/横12/字14/20/min宽128；open控件强调/选中态，picker与箭头200ms，reduce跳过，旧WebKit系统反馈；选项共享固定高44/横12/R4/14字20行高400字重；hint11/16与上下4仍容纳44",
       "baseline_runtime_measurements": [
         {
           "viewport": {
@@ -1261,8 +1273,8 @@
       },
       "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
       "baseline_current": "UIKit管理行高/宽/字体",
-      "current": "已换CoverActionMenu Web popover/回退DOM，R8/内4/行44/字14/20；原native桥和注册已删除",
-      "selected_standard": "已换CoverActionMenu Web popover/回退DOM，R8/内4/行44/字14/20；原native桥和注册已删除"
+      "current": "Web manual顶层：背景压暗/模糊+只读封面浮起预览+R8/pad4/row44操作菜单；卡片锚定/间4/安全区16；进入归位200ms，reduce立即；宽跟封面128–320并受安全区限制；退出清理克隆；选项共享固定高44/横12/R4/14字20行高400字重；hint11/16与上下4仍容纳44",
+      "selected_standard": "Web manual顶层：背景压暗/模糊+只读封面浮起预览+R8/pad4/row44操作菜单；卡片锚定/间4/安全区16；进入归位200ms，reduce立即；宽跟封面128–320并受安全区限制；退出清理克隆；选项共享固定高44/横12/R4/14字20行高400字重；hint11/16与上下4仍容纳44"
     },
     {
       "id": "confirm_dialog",
@@ -1994,6 +2006,15 @@
     {
       "path": "build/releases/1.1.101/verification/device-build.log",
       "scope": "native iOS archive/export and bridge-removal linking"
+    },
+    {
+      "version": "1.1.102",
+      "method": "Chrome real CDP touchStart, hold560ms, contextmenu, hold1000ms, touchEnd, wait1000ms; production frontend settings geometry",
+      "result": "menu remains visible in top layer and action executes; both selectors visible28/target44/minwidth64/R4; switches40x24; no physical touch acceptance implied",
+      "logs": [
+        "build/releases/1.1.102/verification/menu-regression.log",
+        "build/releases/1.1.102/verification/dimensions-regression.log"
+      ]
     }
   ]
 }
