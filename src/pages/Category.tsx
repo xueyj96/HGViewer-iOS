@@ -8,13 +8,12 @@ import { useIOSBrowseCoverMenu } from "../components/IOSCoverMenu";
 import { IOSSwipeSegments, IOSTabPages, useIOSTabSwipe } from "../components/IOSTabSwipe";
 import { Masonry, RowCard } from "../components/cards";
 import { Img, PageStatus } from "../components/ui";
-import { IBack, IBoltF, IChevR, IFileText, IGrid, IPlayF, ITrophy, IUser } from "../icons";
+import { IBack, IChevR, IFileText, IGrid, IPlayF, ITrophy } from "../icons";
 
+// Navigation lists only currently available upstream categories.
 export const CHANNELS = [
   { cate: "ai-duanju", name: "AI 成人短剧", desc: "高能反转 · 一口气看完" },
   { cate: "ai-manju", name: "AI 成人漫剧", desc: "国创漫剧 · 每周更新" },
-  { cate: "ai-huanlian", name: "AI 换脸", desc: "换脸演绎 · 全新剧情" },
-  { cate: "ai-mogai", name: "AI 魔改", desc: "魔改名场面 · 脑洞大开" },
 ] as const;
 
 export default function Category({ wide, active = true }: { wide: boolean; active?: boolean }) {
@@ -26,7 +25,7 @@ function IosCategory({ active }: { active: boolean }) {
   const [section, setSection] = useState<"频道" | "发现">("频道");
   const sectionIndex = section === "频道" ? 0 : 1;
   const tabs = useIOSTabSwipe({ index: sectionIndex, count: 2, onChange: (index) => setSection(index === 0 ? "频道" : "发现"), enabled: isIos && active });
-  const icons = [IPlayF, IGrid, IUser, IBoltF];
+  const icons = [IPlayF, IGrid];
 
   return (
     <div className="hg-ios-category absolute inset-0 flex flex-col bg-bg">

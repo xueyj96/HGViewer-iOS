@@ -114,11 +114,13 @@ html.theme-light .plat-ios {
 }
 
 .plat-ios .hg-tabbar > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   height: var(--ios-control-target);
-  padding-inline: var(--ios-control-gap);
+  padding-inline: 0;
+  gap: 0;
 }
 
-.plat-ios .hg-tabbar > div,
 .plat-ios .hg-ios-video-actions,
 .plat-ios .hg-ios-segments {
   gap: var(--ios-control-gap);
@@ -142,9 +144,16 @@ html.theme-light .plat-ios {
 }
 
 .plat-ios .hg-tabbar button {
+  min-width: 0;
   font-size: 12px;
   color: var(--p-mut);
   transition: color 200ms ease;
+}
+
+/* Keep adjacent hit areas continuous, including while a tab is pressed. */
+.plat-ios .hg-tabbar button:active {
+  transform: none;
+  opacity: .72;
 }
 
 .plat-ios .hg-tabbar button[aria-current="page"] {
@@ -1506,12 +1515,8 @@ html:has(.hg-native-video.is-ready) body,
 .plat-ios .hg-ios-full-action-face { display: flex; align-items: center; justify-content: center; gap: 4px; height: var(--ios-control-face); min-width: var(--ios-control-face); padding-inline: 8px; border: .5px solid var(--ios-media-border); border-radius: var(--ios-control-radius); background: var(--ios-media-chrome); }
 .plat-ios .hg-ios-full-action[data-active="true"] .hg-ios-full-action-face { background: var(--p-primary); color: var(--p-on-primary); }
 .plat-ios .hg-ios-speed-dismiss { height: var(--ios-control-target); min-height: var(--ios-control-target); min-width: var(--ios-control-target); justify-content: center; padding: 0; border-radius: var(--ios-control-radius); background: transparent; }
-.plat-ios .hg-ios-speed-dismiss-face { display: flex; align-items: center; justify-content: center; gap: var(--ios-control-gap); height: var(--ios-control-face); padding: 0 var(--ios-row-inset); border-radius: var(--ios-control-radius); font-size: 13px; line-height: 20px; }
-.plat-ios .hg-ios-speed-copy { display: grid; text-align: center; }
-.plat-ios .hg-ios-speed-copy > span { grid-area: 1 / 1; }
-.plat-ios .hg-ios-speed-measure { padding-inline-start: calc(16px + var(--ios-control-gap)); }
-.plat-ios .hg-ios-speed-current { display: flex; align-items: center; justify-self: center; gap: var(--ios-control-gap); }
-.plat-ios .hg-ios-speed-current > svg { flex-shrink: 0; }
+.plat-ios .hg-ios-speed-dismiss-face { display: flex; align-items: center; justify-content: center; gap: var(--ios-control-gap); height: var(--ios-control-face); padding: 0 var(--ios-content-gap); border-radius: var(--ios-control-radius); font-size: 13px; line-height: 20px; }
+.plat-ios .hg-ios-speed-dismiss-face > svg { flex-shrink: 0; }
 .plat-ios .hg-ios-article-seek-target { height: var(--ios-control-target); display: flex; align-items: center; }
 .plat-ios .hg-ios-article-seek-target > .hg-range { display: block; height: var(--ios-control-target); margin: 0; }
 .plat-ios .hg-ios-inline-controls .hg-range::-webkit-slider-runnable-track { height: 4px; }
@@ -1599,4 +1604,19 @@ html:has(.hg-native-video.is-ready) body,
 .plat-ios .hg-ios-tab-glyph[data-static="true"] > svg { opacity: 1; transition: none; }
 @media (prefers-reduced-motion: reduce) {
   .plat-ios .hg-tabbar::before, .plat-ios .hg-tabbar button, .plat-ios .hg-ios-tab-glyph > svg { transition: none; }
+}
+
+/* One continuously morphing glyph; opacity belongs to the whole status indicator. */
+.plat-ios .hg-playback-feedback svg {
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+.plat-ios .hg-playback-feedback[data-shown="true"] .hg-playback-feedback-glyph { opacity: 1; }
+.plat-ios .hg-playback-feedback[data-visible="false"][data-paused] .hg-playback-feedback-glyph { opacity: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .plat-ios .hg-playback-feedback { animation: hg-playback-feedback-enter 180ms ease both; }
+  @keyframes hg-playback-feedback-enter { from { opacity: 0; } to { opacity: 1; } }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plat-ios .hg-playback-feedback svg { transition: none; }
 }

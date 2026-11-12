@@ -1,24 +1,26 @@
+import PlaybackPanels, { type PlaybackPanel } from "./PlaybackPanels";
+import { usePlaybackProgress } from "./usePlaybackProgress";
+import { usePlaybackSource } from "./usePlaybackSource";
+import PlaybackFeedback from "./PlaybackFeedback";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, Fragment } from "react";
-import { api, isIos, isMobile, cover, fmt, fmtTime, mediaUrl, offlineCover, offlineMedia, watchedPlaylist, type OfflineEpisode } from "../api";
-import type { Detail, Episode, Post, VideoCard } from "../types";
+import { api, isIos, isMobile, cover, fmt, fmtTime, offlineCover, type OfflineEpisode } from "../api";
+import type { Detail, Episode, Post } from "../types";
 import { useStore } from "../store";
 import type { PlaybackSidebarAction } from "../playbackSidebar";
-import { Avatar, CompactAction, Img, PlaybackError, Sheet } from "./ui";
+import { Img, PlaybackError } from "./ui";
 import VideoSurface, { type VideoHandle } from "./VideoSurface";
-import IOSVideoSurface, { preloadIOSPlayback } from "./IOSVideoSurface";
+import IOSVideoSurface from "./IOSVideoSurface";
 import { IOSPageBar } from "./IOSPageBar";
-import { IOSTabPages, IOSSwipeSegments, useIOSTabSwipe } from "./IOSTabSwipe";
+import { useIOSTabSwipe } from "./IOSTabSwipe";
 import { useIOSPlaybackRail } from "./IOSNavigation";
 import { usePlaybackTap } from "./usePlaybackTap";
-import { edgeSwipeSide } from "./edgeSwipe";
+import { usePlaybackGestures } from "./usePlaybackGestures";
 import { QualityRailButton, QualitySheet, type PlaybackQuality } from "./PlaybackQuality";
 import PlayerControls from "./PlayerControls";
 import IOSRotateButton from "./IOSRotateButton";
-import { ArticlePanel, CommentsPanel, EpisodeSortButton, EpisodesPanel } from "./Panels";
-import { cacheSize } from "./CachePageFrame";
 import { setBackHandler } from "../back";
 import {
-  IBack, IBoltF, IChevR, IChevronDown, IChevronUp, IClose, ICommentF, ICompress, IDownload, IExpand, IFileText, IHeart, IHeartF, IInfo,
+  IBack, IBoltF, IChevR, IChevronDown, IChevronUp, ICommentF, ICompress, IDownload, IExpand, IFileText, IHeart, IHeartF, IInfo,
   IList, ILockF, IPauseF, IPlayF, IStar, IStarF, IVol, IVolMute,
 } from "../icons";
 
@@ -39,25 +41,6 @@ type Props = {
   offlineCoverIds?: number[];
 };
 
-type Stream = { url: string; watchKey?: number };
-
-async function resolveStream(id: number, ep: number): Promise<Stream> {
-  const info = await api.play(id, ep);
-  const raw = info?.video_url?.trim() || (isIos ? info?.video_url_hevc?.trim() : "");
-  if (!raw) throw new Error("当前线路未返回这集的播放地址");
-  const key = isIos ? await api.watchBegin(id, ep, raw).catch(() => null) : null;
-  return { url: key ? watchedPlaylist(key, raw) : raw, watchKey: key ?? undefined };
-}
-
-function onlineSource(stream: Stream) {
-  return {
-    kind: "online" as const,
-    url: stream.url.startsWith("hg://localhost/") ? new URL(stream.url).searchParams.get("u") || "" : stream.url,
-    watch_key: stream.watchKey,
-  };
-}
-
-const stripHtml = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
 
 export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind = "video", active, bottomInset, onBack, onNearEnd, startEp, startTime, offlineItems, offlineCoverIds }: Props) {
   const store = useStore();
@@ -71,14 +54,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const pageHeight = useRef(0);
   const [epMap, setEpMap] = useState<Record<number, number>>(() => (startEp ? { [videoIds[startIndex]]: startEp } : {}));
   const [details, setDetails] = useState<Record<number, Detail>>({});
-  const [playUrls, setPlayUrls] = useState<Record<string, Stream>>({});
-  const warmStreams = useRef(new Map<string, { promise: Promise<Stream>; expires: number }>());
-  const [cacheChoice, setCacheChoice] = useState<{ key: string; episode: OfflineEpisode | null }>();
-  const [cards, setCards] = useState<Record<number, VideoCard>>({});
   const [posts, setPosts] = useState<Record<number, Post>>({});
 
-  const [time, setTime] = useState(0);
-  const [duration, setDuration] = useState(0);
   const [vsize, setVsize] = useState({ w: 0, h: 0 });
   const [buffered, setBuffered] = useState(0);
   // Opening the app is not playback intent. Once someone starts the home
@@ -90,7 +67,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [waiting, setWaiting] = useState(false);
   const [retry, setRetry] = useState(0);
   const [err, setErr] = useState("");
-  const [panel, setPanel] = useState<"episodes" | "comments" | "article" | "detail" | "quality" | null>(null);
+  const [panel, setPanel] = useState<PlaybackPanel>(null);
   const [descending, setDescending] = useState(false);
   const toggleEpisodeOrder = () => setDescending((value) => !value);
   const activeDetailPanel = panel === "detail" || panel === "episodes" ? panel : null;
@@ -103,7 +80,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     onChange: (index) => setPanel(index === 1 ? "episodes" : "detail"),
     enabled: isIos && active && !offlineItems && activeDetailPanel !== null });
   const cachedEpisodesPage = isIos && !!offlineItems && detailPanel === "episodes";
-  const fullDetails = isIos;
   const fullPanel = isIos && (panel === "comments" || activeDetailPanel !== null);
   const [commentsPresent, setCommentsPresent] = useState(false);
   const [detailsPresent, setDetailsPresent] = useState(false);
@@ -112,14 +88,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [quality, setQuality] = useState<PlaybackQuality | null>(null);
   const [qualityLevel, setQualityLevel] = useState(-1);
   const [descOpen, setDescOpen] = useState(false);
-  /* 续播：拿到时长后再 seek 一次（只对进入时那一条生效） */
-  const resumeRef = useRef<{ key: string; t: number } | null>(
-    startTime && startTime > 1 ? { key: `${videoIds[startIndex]}:${startEp || 1}`, t: startTime } : null,
-  );
-  /* 观看进度：onTime 里节流写回 store，卸载时再兜一次 */
-  const liveRef = useRef({ key: "", id: 0, ep: 1, dur: 0, t: 0, dirty: false });
-  const lastSaveRef = useRef(0);
-  const historyPlayback = useRef<string | undefined>(undefined);
   const theater = store.theater;
   const setTheater = store.setTheater;
   const fs = store.fs;
@@ -143,24 +111,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   }, [paused]);
   const [fullscreen, setFullscreen] = useState(false);
   const [heartBurst, setHeartBurst] = useState(0);
-  /* —— 移动端手势 —— */
-  const [holdSpeed, setHoldSpeed] = useState(false);
   const [speedLock, setSpeedLock] = useState(false);
-  const [lockArmed, setLockArmed] = useState(false);
-  const holdRef = useRef(false);
-  const lockArmedRef = useRef(false);
-  const [scrub, setScrub] = useState<{ pct: number; target: number } | null>(null);
-  const scrubTarget = useRef<number | null>(null);
-  /* 进度条拖动 */
-  const barScrub = useRef<{ wasPlaying: boolean } | null>(null);
-  const [barPct, setBarPct] = useState<number | null>(null);
-  const railSwipe = useRef(false);
   const episodeTimer = useRef<number | undefined>(undefined);
   const [episodeEntry, setEpisodeEntry] = useState<{ key: string; direction: number }>();
-  const gesture = useRef<{
-    x: number; y: number; startY: number; center: boolean; rail: boolean; t: number; timer: number | null;
-    mode: "idle" | "hold" | "scrub" | "episode"; base: number; width: number; side: number; edgePull: number; wasPlaying: boolean;
-  } | null>(null);
 
   const curId = videoIds[index];
   const detail = details[curId];
@@ -183,60 +136,40 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   }, [active, playKey]);
   const post = posts[curId];
   const surfaceKey = `${playKey}:${retry}`;
+  const progress = usePlaybackProgress({ id: curId, ep: curEp, active, attempt: surfaceKey,
+    initialResume: startTime && startTime > 1 ? { key: `${videoIds[startIndex]}:${startEp || 1}`, t: startTime } : null,
+    resumeOnReturn: isIos, addHistory, seek: (target) => videoRef.current?.seek(target) });
+  const { time, duration, setTime, onTime: onTimeTick, onDuration: onDurationTick } = progress;
   const playbackIntent = useRef<{ key: string; playing: boolean } | undefined>(undefined);
   useLayoutEffect(() => {
     if (playbackIntent.current?.key !== surfaceKey) playbackIntent.current = undefined;
   }, [surfaceKey]);
-  const checkCache = isIos && kind === "video" && !offlineItems;
-  const cacheReady = !checkCache || cacheChoice?.key === surfaceKey;
-  const offlineEpisode = cachedShow?.find((item) => item.ep === curEp) ||
-    (cacheReady && checkCache ? cacheChoice?.episode : undefined);
   const playbackTap = usePlaybackTap(
     () => videoRef.current?.toggle(),
     () => { setPanel(null); setClear((value) => !value); },
     `${active}:${surfaceKey}`,
   );
-  const stream = playUrls[playKey];
-  const playUrl = !cacheReady ? "" : offlineEpisode ? offlineMedia(offlineEpisode) : kind === "post" ? (post?.video_url ? mediaUrl(post.video_url) : "") : (stream?.url || "");
-  const nativeSource = offlineEpisode
-    ? { kind: "offline" as const, id: curId, ep: curEp, mp4: offlineEpisode.mp4 }
-    : onlineSource({ url: playUrl, watchKey: stream?.watchKey });
   const episodes = offlineItems
     ? (cachedShow ?? []).map((item) => ({ ep_num: item.ep, title: `第 ${item.ep} 集`, duration: 0, status: 1 }))
     : detail?.episodes || [];
   const nextConsecutiveEpisode = episodes.find(({ ep_num }) => ep_num === curEp + 1);
+  const orderedEpisodes = [...episodes].sort((a, b) => a.ep_num - b.ep_num);
+  const currentEpisodeIndex = orderedEpisodes.findIndex((item) => item.ep_num === curEp);
+  const previousEpisode = currentEpisodeIndex > 0 ? orderedEpisodes[currentEpisodeIndex - 1] : undefined;
+  const nextEpisode = currentEpisodeIndex >= 0 ? orderedEpisodes[currentEpisodeIndex + 1] : undefined;
+
+  const candidates = useMemo(() => [
+      { id: videoIds[index + 1], ep: epMap[videoIds[index + 1]] ?? offlineByShow.get(videoIds[index + 1])?.[0]?.ep ?? 1 },
+      { id: curId, ep: nextEpisode?.ep_num },
+      { id: videoIds[index - 1], ep: epMap[videoIds[index - 1]] ?? offlineByShow.get(videoIds[index - 1])?.[0]?.ep ?? 1 },
+      { id: curId, ep: previousEpisode?.ep_num },
+    ], [videoIds, index, epMap, offlineByShow, curId, nextEpisode?.ep_num, previousEpisode?.ep_num]);
+  const { stream, playUrl, nativeSource, offlineEpisode, invalidateCurrentSource } = usePlaybackSource({
+    kind, active, curId, curEp, retry, offlineItems, offlineByShow, posts, detail, candidates,
+    readyToPreload: isIos && active && duration > 0 && !paused && !waiting && !err,
+    onError: setErr,
+  });
   const videoTouchAction = "pan-y";
-
-  /* 观看进度按播放项保存，切剧、切集或退出时补写节流期间的最后位置。 */
-  const onTimeTick = (t: number) => {
-    const current = liveRef.current;
-    const dur = current.key === playKey ? current.dur : 0;
-    const record = active && historyPlayback.current === playKey;
-    liveRef.current = { key: playKey, id: curId, ep: curEp, dur, t, dirty: record };
-    setTime(t);
-    const now = Date.now();
-    if (record && dur > 0 && now - lastSaveRef.current > 5000) {
-      lastSaveRef.current = now;
-      addHistory(curId, curEp, t, dur);
-      liveRef.current.dirty = false;
-    }
-  };
-
-  /* 拿到时长后再续播：只对进入时那一条生效，且不跳到片尾 */
-  const onDurationTick = (d: number) => {
-    setDuration(d);
-    const current = liveRef.current;
-    liveRef.current = current.key === playKey
-      ? { ...current, dur: d }
-      : { key: playKey, id: curId, ep: curEp, dur: d, t: 0, dirty: false };
-    const r = resumeRef.current;
-    if (r && r.key === playKey && r.t > 1 && (!d || r.t < d - 3)) {
-      resumeRef.current = null;
-      liveRef.current = { ...liveRef.current, t: r.t, dirty: false };
-      videoRef.current?.seek(r.t);
-      setTime(r.t);
-    }
-  };
 
   /** 统一视图模型：短剧与吃瓜帖子共用同一套播放界面 */
   const meta = kind === "post"
@@ -254,16 +187,16 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         episodes: [] as Episode[],
       }
     : {
-        title: offlineEpisode?.title || detail?.title || cards[curId]?.title || "",
-        cover: detail?.cover || cards[curId]?.cover || "",
+        title: offlineEpisode?.title || detail?.title || "",
+        cover: detail?.cover || "",
         desc: detail?.description || "",
         author: detail?.author?.name || "黄果短剧",
         authorId: detail?.author?.id || -1,
         tags: detail?.tags || [],
         score: detail?.score || 0,
-        like: detail?.counts?.like ?? cards[curId]?.like_count ?? 0,
-        comment: detail?.counts?.comment ?? cards[curId]?.comment_count ?? 0,
-        collect: detail?.counts?.collect ?? cards[curId]?.collect_count ?? 0,
+        like: detail?.counts?.like ?? 0,
+        comment: detail?.counts?.comment ?? 0,
+        collect: detail?.counts?.collect ?? 0,
         episodes: detail?.episodes || [],
       };
 
@@ -271,10 +204,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const hasVideo = kind === "video" || !!post?.video_url;
   const articleHtml = kind === "post" && !hasVideo ? (post?.content || "") : "";
 
-  /* 倍速：长按 / 锁定 → 2.0x，否则用基准倍速 */
-  const effRate = holdSpeed || speedLock ? 2 : rate;
-  /* 进度条显示百分比（拖动时用拖动值） */
-  const barProgress = barPct ?? (duration ? time / duration : 0);
   /* Android 保留应用内旋转。iOS 的 WebView 已跟随系统方向。 */
   const wideVideo = vsize.w > vsize.h && vsize.h > 0;
   const rotated = !isIos && !isDesktop && fs && wideVideo;
@@ -362,43 +291,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, index, videoIds, retry]);
 
-  useEffect(() => {
-    if (stream?.watchKey && detail) {
-      void api.watchDetails(stream.watchKey, detail.title, (detail.episodes || []).map((item) => item.ep_num), detail.cover).catch(() => {});
-    }
-  }, [stream?.watchKey, detail]);
-
-  /* Resolve the local copy before requesting a stream. */
-  useEffect(() => {
-    if (kind !== "video" || !curId || offlineItems) return;
-    if (isIos && !active) {
-      setCacheChoice(undefined);
-      return;
-    }
-    let alive = true;
-    const resolve = async () => {
-      if (checkCache) {
-        const episode = await api.offlineEpisode(curId, curEp).catch(() => null);
-        if (!alive) return;
-        setCacheChoice({ key: surfaceKey, episode });
-        if (episode) {
-          return;
-        }
-      }
-      if (playUrls[playKey]) return;
-      const warm = warmStreams.current.get(playKey);
-      warmStreams.current.delete(playKey);
-      const resolved = warm && warm.expires > Date.now()
-        ? await warm.promise.catch(() => resolveStream(curId, curEp))
-        : await resolveStream(curId, curEp);
-      if (!alive) return;
-      setPlayUrls((m) => ({ ...m, [playKey]: resolved }));
-    };
-    void resolve().catch((e) => { if (alive) setErr((e as Error).message || "取播放地址失败"); });
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, curId, curEp, retry, isIos && active]);
-
   const onVideoEnded = () => {
     if (offlineItems) {
       if (cachedShow?.some((item) => item.ep > curEp)) stepEpisode(1);
@@ -421,26 +313,16 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (kind === "post") {
       setPosts(({ [curId]: _discard, ...remaining }) => remaining);
     } else {
-      setPlayUrls(({ [playKey]: _discard, ...remaining }) => remaining);
+      invalidateCurrentSource();
     }
     setRetry((n) => n + 1);
   };
 
   /* 切换条目/集数时重置播放状态 */
   useEffect(() => {
-    setTime(0); setDuration(0); setBuffered(0); setErr("");
+    setBuffered(0); setErr("");
     setWaiting(playbackStarted.current); setPaused(!playbackStarted.current); setDescOpen(false);
     setVsize({ w: 0, h: 0 });
-    if (gesture.current?.timer) window.clearTimeout(gesture.current.timer);
-    gesture.current = null;
-    scrubTarget.current = null;
-    barScrub.current = null;
-    holdRef.current = false;
-    lockArmedRef.current = false;
-    setHoldSpeed(false);
-    setLockArmed(false);
-    setScrub(null);
-    setBarPct(null);
     setQuality(null);
     setQualityLevel(-1);
     setPanel((current) => current === "quality" ? null : current);
@@ -450,27 +332,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   useEffect(() => {
     if (active) return;
     videoRef.current?.pause();
-    const position = liveRef.current;
-    if (isIos && position.id === curId && position.ep === curEp && position.t > 1) {
-      resumeRef.current = { key: playKey, t: position.t };
-    }
-  }, [active, curId, curEp, playKey]);
-
-  useLayoutEffect(() => {
-    historyPlayback.current = undefined;
-    if (!active) return;
-    lastSaveRef.current = 0;
-    return () => {
-      const progress = liveRef.current;
-      if (progress.key === playKey) {
-        if (historyPlayback.current === playKey && progress.dur > 0 && progress.dirty) {
-          addHistory(progress.id, progress.ep, progress.t, progress.dur);
-        }
-        progress.dirty = false;
-      }
-      historyPlayback.current = undefined;
-    };
-  }, [active, playKey, addHistory]);
+  }, [active]);
 
   /* 键盘 */
   const onPlaybackKey = useEffectEvent((e: KeyboardEvent) => {
@@ -521,58 +383,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     else el.requestFullscreen().catch(() => {});
   };
 
-  const orderedEpisodes = [...episodes].sort((a, b) => a.ep_num - b.ep_num);
-  const currentEpisodeIndex = orderedEpisodes.findIndex((item) => item.ep_num === curEp);
-  const previousEpisode = currentEpisodeIndex > 0 ? orderedEpisodes[currentEpisodeIndex - 1] : undefined;
-  const nextEpisode = currentEpisodeIndex >= 0 ? orderedEpisodes[currentEpisodeIndex + 1] : undefined;
-
-  // Keep the adjacent works and episodes ready after the current item starts playing.
-  const readyToPreload = isIos && active && duration > 0 && !paused && !waiting && !err;
-  useEffect(() => {
-    if (!readyToPreload) return;
-    let alive = true;
-    const candidates = [
-      { id: videoIds[index + 1], ep: epMap[videoIds[index + 1]] ?? offlineByShow.get(videoIds[index + 1])?.[0]?.ep ?? 1 },
-      { id: curId, ep: nextEpisode?.ep_num },
-      { id: videoIds[index - 1], ep: epMap[videoIds[index - 1]] ?? offlineByShow.get(videoIds[index - 1])?.[0]?.ep ?? 1 },
-      { id: curId, ep: previousEpisode?.ep_num },
-    ];
-    const keep = new Set([playKey, ...candidates.map(({ id, ep }) => `${id}:${ep}`)]);
-    for (const key of warmStreams.current.keys()) if (!keep.has(key)) warmStreams.current.delete(key);
-    const preload = async ({ id, ep }: typeof candidates[number]) => {
-      if (!alive || document.hidden || !id || !ep) return;
-      if (kind === "post") {
-        const url = posts[id]?.video_url;
-        if (url && id !== curId) await preloadIOSPlayback({ kind: "online", url });
-        return;
-      }
-      const local = offlineItems
-        ? offlineByShow.get(id)?.find((item) => item.ep === ep)
-        : await api.offlineEpisode(id, ep).catch(() => null);
-      if (!alive) return;
-      if (local) {
-        await preloadIOSPlayback({ kind: "offline", id, ep, mp4: local.mp4 });
-      } else if (!offlineItems) {
-        const key = `${id}:${ep}`;
-        const cached = warmStreams.current.get(key);
-        const promise = playUrls[key] ? Promise.resolve(playUrls[key]) :
-          cached && cached.expires > Date.now() ? cached.promise : resolveStream(id, ep);
-        warmStreams.current.set(key, { promise, expires: Date.now() + 30_000 });
-        try {
-          const source = await promise;
-          if (alive) await preloadIOSPlayback(onlineSource(source));
-        } catch {
-          if (warmStreams.current.get(key)?.promise === promise) warmStreams.current.delete(key);
-        }
-      }
-    };
-    const timer = window.setTimeout(() => {
-      // Prioritize forward playback and keep background requests serial.
-      void (async () => { for (const candidate of candidates) await preload(candidate); })();
-    }, 450);
-    return () => { alive = false; window.clearTimeout(timer); };
-  }, [readyToPreload, kind, curId, playKey, index, videoIds, epMap, offlineByShow, offlineItems, nextEpisode?.ep_num, previousEpisode?.ep_num, posts, playUrls]);
-
   const stepEpisode = (direction: -1 | 1, animate = false) => {
     const target = direction < 0 ? previousEpisode : nextEpisode;
     if (!target) {
@@ -600,188 +410,22 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     <QualityRailButton selected={qualityLevel} quality={quality} onClick={(event) => openRailPanel("quality", event.currentTarget)} />
   );
 
-  /* 长按倍速、画面拖动进度和边缘滑动切集。 */
-  const onDown = (e: React.PointerEvent<HTMLDivElement>, rail = false) => {
-    if (isDesktop || !e.isPrimary || e.button !== 0 || episodeTimer.current !== undefined) return;
-    railSwipe.current = false;
-    const el = e.currentTarget;
-    const bounds = (isIos && boxRef.current ? boxRef.current : el).getBoundingClientRect();
-    const width = isIos ? bounds.width || 1 : el.clientWidth || 1;
-    const x = e.clientX - bounds.left;
-    const y = e.clientY - bounds.top;
-    const side = isIos && kind === "video" && currentEpisodeIndex >= 0
-      ? rail ? 1 : edgeSwipeSide(x, width, boxRef.current ?? undefined)
-      : 0;
-    if (rail && !side) return;
-    if (!rail) {
-      try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-    }
-    const center = x >= width * 0.3 && x <= width * 0.7 && y >= bounds.height * 0.25 && y <= bounds.height * 0.75;
-    const g = {
-      x: e.clientX, y: e.clientY, startY: e.clientY, t: Date.now(), base: time, width, side, center, rail, edgePull: 0,
-      wasPlaying: videoRef.current?.isPlaying() === true,
-      mode: "idle" as NonNullable<typeof gesture.current>["mode"],
-      timer: rail ? null : window.setTimeout(() => {
-        const cur = gesture.current;
-        if (!cur || cur.mode !== "idle") return;
-        playbackTap.cancel();
-        cur.mode = "hold";
-        holdRef.current = true;
-        setHoldSpeed(true);
-        setLockArmed(false);
-        lockArmedRef.current = false;
-        try { navigator.vibrate?.(25); } catch { /* ignore */ }
-      }, 380),
-    };
-    gesture.current = g;
-  };
-
-  const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const g = gesture.current;
-    if (!g || isDesktop) return;
-    const dx = e.clientX - g.x;
-    const dy = e.clientY - g.y;
-
-    /* 长按中：上滑 64px 进入「松开即锁定」 */
-    if (g.mode === "hold") {
-      const armed = g.startY - e.clientY > 64;
-      if (armed !== lockArmedRef.current) {
-        lockArmedRef.current = armed;
-        setLockArmed(armed);
-      }
-      return;
-    }
-
-    if (g.mode === "idle") {
-      if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy)) {
-        if (g.timer) window.clearTimeout(g.timer);
-        playbackTap.cancel();
-        if (g.side && dx * g.side < 0) {
-          g.mode = "episode";
-          if (g.rail) {
-            try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-          }
-        } else if (!g.rail) {
-          g.mode = "scrub";
-          videoRef.current?.pause();
-        }
-      } else if (Math.abs(dy) > 14) {
-        if (g.timer) window.clearTimeout(g.timer);
-        playbackTap.cancel();
-      }
-    }
-
-    if (g.mode === "episode") {
-      const distance = Math.max(0, -dx * g.side);
-      const target = g.side < 0 ? previousEpisode : nextEpisode;
-      const travel = target
-        ? Math.min(distance, g.width * 0.85)
-        : 36 * distance / (distance + 85);
-      const offset = -g.side * travel;
-      if (offset !== g.edgePull) {
-        g.edgePull = offset;
-        videoRef.current?.pullEdge?.(offset, "horizontal");
-      }
-      return;
-    }
-
-    if (g.mode === "scrub") {
-      const total = duration || 0;
-      if (!total) return;
-      const target = Math.max(0, Math.min(total, g.base + (dx / g.width) * total));
-      scrubTarget.current = target;
-      setScrub({ pct: (target / total) * 100, target });
-    }
-  };
-
-  const onUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    const g = gesture.current;
-    gesture.current = null;
-    if (!g) return;
-    if (g.timer) window.clearTimeout(g.timer);
-
-    if (g.mode === "hold") {
-      holdRef.current = false;
-      setHoldSpeed(false);
-      if (lockArmedRef.current && e.type === "pointerup") setSpeedLock(true);
-      lockArmedRef.current = false;
-      setLockArmed(false);
-      return;
-    }
-    const dx = e.clientX - g.x;
-    const dy = e.clientY - g.y;
-    if (g.mode === "episode") {
-      const direction = g.side < 0 ? -1 : 1;
-      const target = direction < 0 ? previousEpisode : nextEpisode;
-      const threshold = Math.max(52, Math.min(96, g.width * 0.16));
-      railSwipe.current = g.rail;
-      if (target && e.type === "pointerup" && -dx * direction >= threshold && Math.abs(dx) > Math.abs(dy)) {
-        stepEpisode(direction, true);
-      } else if (g.edgePull) {
-        videoRef.current?.pullEdge?.(0, "horizontal");
-      }
-      return;
-    }
-    if (g.mode === "scrub") {
-      const target = scrubTarget.current;
-      if (target != null && e.type === "pointerup") videoRef.current?.seek(target, g.wasPlaying);
-      else if (g.wasPlaying) videoRef.current?.play();
-      setScrub(null);
-      scrubTarget.current = null;
-      return;
-    }
-    if (g.rail || e.type !== "pointerup" || Date.now() - g.t >= 260 || Math.hypot(dx, dy) > 14) return;
-    if (isIos) playbackTap.tap(g.center);
-    else videoRef.current?.toggle();
-  };
-
-  const onLostCapture = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) onUp(event);
-  };
-
-  /* 长按倍速期间禁止原生滚动，否则上滑会被列表吃掉、锁不住倍速 */
-  useEffect(() => {
-    if (isDesktop) return undefined;
-    const el = boxRef.current;
-    if (!el) return undefined;
-    const fn = (e: TouchEvent) => { if (holdRef.current) e.preventDefault(); };
-    el.addEventListener("touchmove", fn, { passive: false });
-    return () => el.removeEventListener("touchmove", fn);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDesktop, videoIds.length]);
-
-  /* —— 进度条拖动（旋转舞台下按 Y 轴换算） —— */
-  const barPctAt = (e: React.PointerEvent<HTMLDivElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    const span = rotated ? r.height : r.width;
-    if (!span) return null;
-    const raw = rotated ? (e.clientY - r.top) / span : (e.clientX - r.left) / span;
-    return Math.max(0, Math.min(1, raw));
-  };
-  const onBarDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-    barScrub.current = { wasPlaying: videoRef.current?.isPlaying() === true };
-    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
-    setBarPct(barPctAt(e));
-  };
-  const onBarMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!barScrub.current) return;
-    e.stopPropagation();
-    setBarPct(barPctAt(e));
-  };
-  const onBarUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    const drag = barScrub.current;
-    if (!drag) return;
-    barScrub.current = null;
-    e.stopPropagation();
-    const pct = e.type === "pointercancel" ? null : barPctAt(e);
-    if (pct != null && duration) {
-      const target = pct * duration;
-      videoRef.current?.seek(target, drag.wasPlaying);
-      setTime(target);
-    }
-    setBarPct(null);
-  };
+  const gestures = usePlaybackGestures({ active, resetKey: surfaceKey, isDesktop, isIos, kind, boxRef, surfaceReady: hasPages,
+    rotated, time, duration, episodesAvailable: currentEpisodeIndex >= 0,
+    hasPrevious: !!previousEpisode, hasNext: !!nextEpisode,
+    episodeBusy: () => episodeTimer.current !== undefined,
+    commands: {
+      isPlaying: () => videoRef.current?.isPlaying() === true,
+      pause: () => videoRef.current?.pause(), play: () => videoRef.current?.play(), toggle: () => videoRef.current?.toggle(),
+      seek: (target, resume) => videoRef.current?.seek(target, resume),
+      pullEdge: (offset, axis) => videoRef.current?.pullEdge?.(offset, axis),
+      stepEpisode: (direction) => stepEpisode(direction, true),
+      tap: playbackTap.tap, cancelTap: playbackTap.cancel,
+      lockSpeed: () => setSpeedLock(true), showTime: setTime,
+    } });
+  const { holdSpeed, lockArmed, scrub, barPct, onDown, onMove, onUp, onLostCapture, onBarDown, onBarMove, onBarUp } = gestures;
+  const effRate = holdSpeed || speedLock ? 2 : rate;
+  const barProgress = barPct ?? (duration ? time / duration : 0);
 
   const togglePip = async () => {
     try {
@@ -818,10 +462,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (requireLogin()) api.follow(uid, on).catch(() => {});
   };
 
-  const openCache = isIos && !offlineItems && kind === "video" && episodes.length > 0 ? () => {
+  const openCacheManagement = () => {
     setPanel(null);
-    store.push({ kind: "offline", id: curId, title: meta.title, episodes: episodes.map((item) => item.ep_num) });
-  } : undefined;
+    store.push({ kind: "offline", id: curId, title: meta.title,
+      ...(!offlineItems ? { episodes: episodes.map((item) => item.ep_num) } : {}) });
+  };
+  const openCache = isIos && !offlineItems && kind === "video" && episodes.length > 0 ? openCacheManagement : undefined;
   const cacheButton = active && openCache && (
     <button type="button" className="hg-ios-media-button pressable" onClick={openCache} aria-label="缓存剧集">
       <IDownload size={20} />
@@ -880,14 +526,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     onSize: (w: number, h: number) => setVsize({ w, h }),
     onPlaying: () => {
       playbackStarted.current = true;
-      if (active && historyPlayback.current !== playKey) {
-        historyPlayback.current = playKey;
-        const progress = liveRef.current;
-        addHistory(curId, curEp, progress.key === playKey ? progress.t : undefined,
-          progress.key === playKey ? progress.dur : undefined);
-        lastSaveRef.current = Date.now();
-        progress.dirty = false;
-      }
+      progress.onPlaying();
       setPaused(false); setWaiting(false);
     },
     onPause: () => { setPaused(true); setWaiting(false); },
@@ -937,8 +576,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           {...playbackGestures}
           onPointerDown={(e) => onDown(e, true)}
           onClickCapture={(e) => {
-            if (!railSwipe.current) return;
-            railSwipe.current = false;
+            if (!gestures.consumeRailSwipe()) return;
             e.preventDefault();
             e.stopPropagation();
           }}>
@@ -952,80 +590,6 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     return <div className="absolute inset-0 bg-black flex items-center justify-center"><div className="w-9 h-9 spinner" /></div>;
   }
 
-  const renderDetailContent = (showEpisodes: boolean) => (
-              <div className="flex min-h-0 flex-1 flex-col">
-                {showEpisodes ? (
-                  <EpisodesPanel bare cachedOnly={cachedEpisodesPage} sortInHeader={fullDetails}
-                    videoId={curId} episodes={episodes} current={curEp} onPick={pickEp} onCache={fullDetails ? undefined : openCache}
-                    descending={descending} onSort={toggleEpisodeOrder} onClose={() => setPanel(null)} />
-                ) : isIos && offlineItems ? (
-                  <div className="hg-ios-browse-content min-h-0 scroll-y pb-5">
-                    <section aria-label="缓存信息" className="hg-ios-content-card flex items-center gap-2">
-                      {offlineCoverIds?.includes(curId) && (
-                        <div className="hg-ios-detail-cover relative aspect-[3/4] shrink-0 overflow-hidden rounded-(--r-sm) bg-s3">
-                          <Img key={curId} src={offlineCover(curId)} raw eager />
-                        </div>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-sm font-semibold leading-snug text-on [overflow-wrap:anywhere]">{meta.title}</h3>
-                        <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs tabular-nums text-mut">
-                          <span>已缓存 {episodes.length} 集</span>
-                          <span>{cacheSize(cachedShow?.reduce((sum, item) => sum + item.bytes, 0) ?? 0)}</span>
-                        </p>
-                      </div>
-                    </section>
-                  </div>
-                ) : (
-                  <div className="hg-ios-browse-content min-h-0 scroll-y px-4 pb-5">
-                    {/* 封面 / 标题 / 评分 / 数据 */}
-                    <div className="hg-ios-content-card hg-ios-detail-overview flex gap-3">
-                      <div className="hg-ios-detail-cover relative w-[84px] shrink-0 rounded-(--r-sm) overflow-hidden bg-s3" style={{ aspectRatio: "3 / 4" }}>
-                        <Img src={meta.cover} />
-                      </div>
-                      <div className="hg-ios-detail-info-column flex-1 min-w-0">
-                        <div className="hg-ios-detail-info min-w-0">
-                          <div className="hg-detail-title text-[13.5px] leading-snug font-bold text-on clamp-2">{meta.title}</div>
-                          <div className="flex items-baseline gap-2 mt-1.5 tabular-nums">
-                            {!!meta.score && <span className="text-[12px] font-bold text-amber">{meta.score.toFixed(1)} 分</span>}
-                            {episodes.length > 0 && <span className="text-[10.5px] text-mut">共 {episodes.length} 集</span>}
-                          </div>
-                        </div>
-                        <div className="hg-ios-detail-metrics flex gap-3 mt-2 text-[10.5px] text-mut tabular-nums">
-                          {([["点赞", meta.like], ["收藏", meta.collect], ["评论", meta.comment]] as const).map(([label, value]) => (
-                            <span key={label}>{label} <b className="font-semibold text-on">{fmt(value)}</b></span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 作者 + 关注 */}
-                    <div className="hg-ios-content-card hg-ios-content-card-next mt-4 flex items-center gap-2.5 rounded-(--r-md) bg-s2 p-2.5">
-                      <Avatar size={isIos ? 32 : 34} name={meta.author} hue={220} />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[12.5px] font-semibold text-on truncate">{meta.author}</div>
-                        <div className="text-[10px] text-mut">作者</div>
-                      </div>
-                      {meta.authorId > 0 && (isIos ? (
-                        <CompactAction className="hg-ios-detail-follow" tone={store.follows.includes(meta.authorId) ? "neutral" : "accent"} onClick={onFollow}>
-                          {store.follows.includes(meta.authorId) ? "已关注" : "关注"}
-                        </CompactAction>
-                      ) : (
-                        <button onClick={onFollow}
-                          className={`h-7 px-3 rounded-full text-[11px] font-semibold pressable ${store.follows.includes(meta.authorId) ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
-                          {store.follows.includes(meta.authorId) ? "已关注" : "+ 关注"}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* 简介 */}
-                    <div className="hg-ios-content-card hg-ios-content-card-next mt-4">
-                      <div className="text-[11px] font-semibold text-dim mb-1.5">简介</div>
-                      <p className="hg-reading-body text-[11.5px] leading-relaxed text-mut whitespace-pre-wrap">{meta.desc || "暂无简介"}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-  );
 
   return (
     <div
@@ -1068,7 +632,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               ) : (
                 <div className="absolute inset-0" style={{ touchAction: videoTouchAction }}
                   {...(isActive ? playbackGestures : undefined)}>
-                  <Img src={offlineByShow.has(vid) ? offlineCover(vid) : details[vid]?.cover || cards[vid]?.cover || posts[vid]?.cover || ""} raw={offlineByShow.has(vid)} eager={Math.abs(i - index) <= 1} />
+                  <Img src={offlineByShow.has(vid) ? offlineCover(vid) : details[vid]?.cover || posts[vid]?.cover || ""} raw={offlineByShow.has(vid)} eager={Math.abs(i - index) <= 1} />
                   <div className="absolute inset-0" style={{ background: "rgba(0,0,0,.25)" }} />
                 </div>
               )}
@@ -1138,19 +702,19 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
                 {kind === "video" && (
                   <>
-                    <button onClick={onLike} className="flex flex-col items-center gap-1 pressable" aria-pressed={isLiked(curId)}>
+                    <button onClick={onLike} aria-label={isLiked(curId) ? "取消点赞" : "点赞"} className="flex flex-col items-center gap-1 pressable" aria-pressed={isLiked(curId)}>
                       <span key={heartBurst} className={heartBurst ? "a-pop" : ""}>
                         {isLiked(curId) ? <IHeartF size={30} className="text-neon" /> : <IHeart size={30} className="text-white tsh" />}
                       </span>
                       <span className="text-[10.5px] text-white/90 tabular-nums">{fmt(likeCount)}</span>
                     </button>
 
-                    <button onClick={() => setPanel("comments")} className="flex flex-col items-center gap-1 pressable">
+                    <button onClick={() => setPanel("comments")} aria-label="评论" className="flex flex-col items-center gap-1 pressable">
                       <ICommentF size={27} className="text-white tsh" />
                       <span className="text-[10.5px] text-white/90 tabular-nums">{fmt(meta.comment)}</span>
                     </button>
 
-                    <button onClick={onFav} className="flex flex-col items-center gap-1 pressable" aria-pressed={isFav(curId)}>
+                    <button onClick={onFav} aria-label={isFav(curId) ? "取消收藏" : "收藏"} className="flex flex-col items-center gap-1 pressable" aria-pressed={isFav(curId)}>
                       {isFav(curId) ? <IStarF size={27} className="hg-gold" /> : <IStar size={27} className="hg-ink hg-ov-shadow" />}
                       <span className="text-[10.5px] text-white/90 tabular-nums">{fmt(meta.collect)}</span>
                     </button>
@@ -1216,7 +780,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       </div>
                     )}
                     <div className="hg-ios-caption-progress hg-ios-seek-target mx-4 mt-2 relative pointer-events-auto" style={{ height: isIos ? 44 : 14, touchAction: "none" }}
-                      onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp}>
+                      onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp} onLostPointerCapture={gestures.onBarLostCapture}>
                       <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[2.5px] rounded-full" style={{ background: "rgba(255,255,255,.3)" }}>
                         <div className="h-full rounded-full bg-white"
                           style={{ width: `${barProgress * 100}%`, transition: barPct !== null ? "none" : "width .25s linear" }} />
@@ -1244,10 +808,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               )}
 
               {/* 暂停 / 缓冲 */}
-              {isActive && paused && !err && (
+              {isIos && isActive && !err && <PlaybackFeedback key={playKey} paused={paused} visible={!waiting} />}
+              {!isIos && isActive && paused && !err && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-                  <span className={`hg-play-glyph ${isIos ? "w-16 h-16" : "w-[66px] h-[66px]"} rounded-full flex items-center justify-center ${isIos ? "" : "backdrop-blur-md"}`}
-                    style={isIos ? undefined : { background: "rgba(0,0,0,.55)", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.12)" }}>
+                  <span className="hg-play-glyph w-[66px] h-[66px] rounded-full flex items-center justify-center backdrop-blur-md"
+                    style={{ background: "rgba(0,0,0,.55)", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.12)" }}>
                     <IPlayF size={28} className="hg-ink ml-0.5" />
                   </span>
                 </div>
@@ -1309,15 +874,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             ${holdSpeed ? "pointer-events-none" : "pressable"}
             ${isIos ? "" : lockArmed || speedLock ? "bg-primary text-on-primary" : "hg-chip-strong"}`}>
           <span className={isIos ? `hg-ios-speed-dismiss-face ${lockArmed || speedLock ? "bg-primary text-on-primary" : "hg-chip-strong"}` : "contents"}>
-          <span className={isIos ? "hg-ios-speed-copy" : "contents"}>
-            {isIos && <span aria-hidden="true" className="hg-ios-speed-measure invisible">{effRate}× 已锁定 · 点按解除</span>}
-            <span className={isIos ? "hg-ios-speed-current" : "contents"}>
               {lockArmed || speedLock ? <ILockF size={16} /> : <IBoltF size={isIos ? 16 : 15} />}
               <span>{effRate}× {holdSpeed
                 ? (lockArmed ? "松手锁定" : "上滑锁定")
                 : (speedLock ? "已锁定 · 点按解除" : "倍速 · 点按恢复")}</span>
-            </span>
-          </span>
           </span>
         </button>
       )}
@@ -1326,7 +886,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       {!isDesktop && fs && (
         <div className="hg-ios-browse-content hg-ios-seek-target hg-ios-full-seek absolute inset-x-0 z-30 px-4" style={{ bottom: isIos ? "calc(var(--sab, 0px) + 56px)" : "calc(var(--sab, 0px) + 52px)", height: isIos ? 44 : 22 }}>
           <div className="relative h-full" style={{ touchAction: "none" }}
-            onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp}>
+            onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp} onLostPointerCapture={gestures.onBarLostCapture}>
             <div className="absolute inset-x-0 bottom-[8px] h-[2.5px] rounded-full" style={{ background: "rgba(255,255,255,.3)" }}>
               <div className="h-full rounded-full bg-white" style={{ width: `${barProgress * 100}%` }} />
             </div>
@@ -1375,89 +935,15 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           setPanel(null);
         }} />
 
-      {isIos && activeDetailPanel && (
-        <IOSPageBar overlay label={cachedEpisodesPage ? "已缓存分集工具" : "剧集详情与选集工具"}
-          onBack={() => setPanel(null)} fillTrailing={!!offlineItems}
-          endAction={detailPanel === "episodes" ? (
-            <EpisodeSortButton descending={descending} onToggle={toggleEpisodeOrder} />
-          ) : (offlineItems || openCache) && (
-            <button type="button" aria-label={offlineItems ? "缓存管理" : "缓存剧集"} onClick={offlineItems ? () => {
-              setPanel(null);
-              store.push({ kind: "offline", id: curId, title: meta.title });
-            } : openCache} className="hg-ios-floating-button hg-ios-header-square grid place-items-center">
-              <IDownload size={16} aria-hidden="true" />
-            </button>
-          )}>
-          {offlineItems ? (
-            <h2 className="min-w-0 flex-1 truncate text-center text-[13px] font-semibold">
-              {cachedEpisodesPage ? "已缓存分集" : "离线剧集详情"}
-            </h2>
-          ) : (
-            <IOSSwipeSegments controller={detailTabs} label="详情与选集">
-              {([["detail", "详情"], ["episodes", "选集"]] as const).map(([key, label], index) => (
-                <button type="button" key={key} aria-pressed={detailPanel === key} onClick={() => detailTabs.select(index)}>{label}</button>
-              ))}
-            </IOSSwipeSegments>
-          )}
-        </IOSPageBar>
-      )}
+      <PlaybackPanels panel={panel} activeDetailPanel={activeDetailPanel} detailPanel={detailPanel} detailTabs={detailTabs}
+        cachedEpisodesPage={cachedEpisodesPage} offlineItems={!!offlineItems} curId={curId} curEp={curEp} playKey={playKey}
+        kind={kind} meta={meta} episodes={episodes} descending={descending} articleHtml={articleHtml} hot={post?.hot}
+        hasOfflineCover={offlineCoverIds?.includes(curId) ?? false}
+        cachedBytes={cachedShow?.reduce((sum, item) => sum + item.bytes, 0) ?? 0}
+        followed={store.follows.includes(meta.authorId)} openCache={openCache} onCacheManagement={openCacheManagement}
+        onPick={pickEp} onFollow={onFollow} onSort={toggleEpisodeOrder} onClose={() => setPanel(null)}
+        onSelectDetail={setPanel} onCommentsPresence={setCommentsPresent} onDetailsPresence={setDetailsPresent} />
 
-      {/* 选集 / 评论：桌面停靠在右侧，iOS 使用整页 */}
-      {isDesktop ? (
-        <div className={`desktop-dock-panel ${panel ? "is-open" : ""}`}>
-          <div className="desktop-dock-inner">
-            {panel === "episodes" ? (
-              <EpisodesPanel videoId={curId} episodes={episodes} current={curEp} onPick={pickEp} onCache={openCache}
-                descending={descending} onSort={toggleEpisodeOrder} onClose={() => setPanel(null)} />
-            ) : panel === "comments" ? (
-              <CommentsPanel videoId={curId} ep={curEp} total={meta.comment} kind={kind} onClose={() => setPanel(null)} />
-            ) : null}
-          </div>
-        </div>
-      ) : (
-        <>
-          <Sheet open={panel === "comments"} onClose={() => setPanel(null)} sharedChrome={isIos}
-            fullPage={isIos ? "评论" : undefined} onPresenceChange={isIos ? setCommentsPresent : undefined}>
-            <div className="flex h-full min-h-0 flex-col" style={isIos ? undefined : { height: "72vh" }}>
-              <CommentsPanel key={playKey} videoId={curId} ep={curEp} total={meta.comment} kind={kind}
-                showNavigation={panel === "comments"} onClose={() => setPanel(null)} />
-            </div>
-          </Sheet>
-
-          {/* 吃瓜图文正文 */}
-          <Sheet open={panel === "article"} onClose={() => setPanel(null)}>
-            <div className="flex flex-col" style={{ height: "78vh" }}>
-              <ArticlePanel title={meta.title} html={articleHtml} cover={meta.cover} hot={post?.hot} onClose={() => setPanel(null)} />
-            </div>
-          </Sheet>
-
-          <Sheet open={activeDetailPanel !== null} onClose={() => setPanel(null)} sharedChrome={isIos}
-            onPresenceChange={isIos ? setDetailsPresent : undefined}
-            fullPage={fullDetails ? cachedEpisodesPage ? "已缓存分集" : offlineItems ? "离线剧集详情" : "剧集详情与选集" : undefined}>
-            <div className={`hg-ios-show-sheet-content flex min-h-0 flex-col ${isIos ? "hg-ios-detail-page" : ""}`} style={isIos ? undefined : { height: "72vh" }}>
-              {!isIos && <div className="flex shrink-0 items-center gap-2 px-4 pb-2">
-                <div role="group" aria-label="详情与选集" className="relative isolate flex h-11 min-w-0 flex-1 px-[3px]">
-                  <span aria-hidden="true" className="absolute inset-x-0 inset-y-1 -z-10 rounded-(--r-ctl) bg-s3" />
-                  {([["detail", "详情"], ["episodes", "选集"]] as const).map(([key, label]) => (
-                    <button type="button" key={key} onClick={() => setPanel(key)} aria-pressed={detailPanel === key}
-                      className="grid flex-1 place-items-center text-[13px] font-semibold leading-none text-mut pressable">
-                      <span className={`grid h-[30px] w-full place-items-center rounded-(--r-ctl) ${detailPanel === key ? "bg-sec text-primary" : ""}`}>{label}</span>
-                    </button>
-                  ))}
-                </div>
-                <button type="button" onClick={() => setPanel(null)} aria-label="关闭" className="grid size-11 shrink-0 place-items-center rounded-full text-mut pressable">
-                  <span className="grid size-9 place-items-center rounded-full bg-s3"><IClose size={16} aria-hidden="true" /></span>
-                </button>
-              </div>}
-
-              {isIos && !offlineItems ? <IOSTabPages controller={detailTabs}>
-                {(index) => renderDetailContent(index === 1)}
-              </IOSTabPages> : renderDetailContent(detailPanel === "episodes")}
-
-            </div>
-          </Sheet>
-        </>
-      )}
     </div>
   );
 }

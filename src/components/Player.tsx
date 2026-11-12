@@ -1,3 +1,4 @@
+import PlaybackFeedback from "./PlaybackFeedback";
 import React, { useEffect, useRef, useState } from "react";
 import { QualityRailButton, QualitySheet, type PlaybackQuality } from "./PlaybackQuality";
 import IOSRotateButton from "./IOSRotateButton";
@@ -145,12 +146,14 @@ export default function Player({
         </div>
       )}
 
+      {isIos && !errMsg && <PlaybackFeedback key={src} paused={!playing} compact visible={!waiting} />}
+
       {!playing && !waiting && !errMsg && (
         <button onClick={tapPicture} aria-label="播放"
           className="absolute inset-0 flex items-center justify-center">
-          <span className={`hg-play-glyph ${isIos ? "hg-ios-inline-play-face w-14 h-14" : "w-16 h-16"} rounded-full bg-black/45 backdrop-blur-sm flex items-center justify-center elev-2 pressable`}>
-            <IPlayF size={isIos ? 24 : 26} className="text-white ml-0.5" />
-          </span>
+          {!isIos && <span className="hg-play-glyph w-16 h-16 rounded-full bg-black/45 backdrop-blur-sm flex items-center justify-center elev-2 pressable">
+            <IPlayF size={26} className="text-white ml-0.5" />
+          </span>}
         </button>
       )}
 

@@ -249,7 +249,13 @@ export function useIOSTopBarMotion(host: HTMLElement | null) {
     const settleEnvironment = () => update(false);
     const takeGesture = (event: PointerEvent) => {
       if (!active.size && !ghosts.size) return;
-      if (event.isPrimary && event.target instanceof Element && event.target.closest(".hg-ios-segments, [data-hg-tab-viewport]")) update(false);
+      if (event.isPrimary && event.target instanceof Element && event.target.closest("[data-hg-tab-viewport]")) update(false);
+    };
+    const takeSegmentClick = (event: MouseEvent) => {
+      if (!active.size && !ghosts.size) return;
+      // The click target is fixed now. Settling on pointerdown can move the
+      // button out from under pointerup and turn its click into a group click.
+      if (event.target instanceof Element && event.target.closest(".hg-ios-segments > button")) update(false);
     };
     const takeKeyboard = (event: KeyboardEvent) => {
       if (!active.size && !ghosts.size) return;
@@ -257,6 +263,7 @@ export function useIOSTopBarMotion(host: HTMLElement | null) {
     };
     document.addEventListener("pointerdown", takeGesture, true);
     document.addEventListener("keydown", takeKeyboard, true);
+    document.addEventListener("click", takeSegmentClick, true);
     const theme = new MutationObserver(settleEnvironment);
     theme.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     const focus = () => {
@@ -272,6 +279,7 @@ export function useIOSTopBarMotion(host: HTMLElement | null) {
       host.removeEventListener("focusin", focus); host.removeEventListener("focusout", focus);
       document.removeEventListener("pointerdown", takeGesture, true);
       document.removeEventListener("keydown", takeKeyboard, true);
+      document.removeEventListener("click", takeSegmentClick, true);
       window.removeEventListener(IOS_LAYOUT_CHANGE, settleEnvironment); reduced.removeEventListener("change", settleEnvironment);
       delete host.dataset.navSurface;
       delete host.dataset.navReady;

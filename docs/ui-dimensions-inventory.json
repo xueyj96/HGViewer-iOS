@@ -2,8 +2,8 @@
   "schema_version": 1,
   "app": "HGViewer/HGhub iOS",
   "as_of": "2026-11-12",
-  "source_version": "1.2.0",
-  "document_state": "final iOS frontend passed 68 light and 68 dark route checks; device acceptance tracked separately",
+  "source_version": "1.2.3",
+  "document_state": "1.2.3 installed; speed feedback uses intrinsic width and 8px horizontal inset; source refactor browser-reviewed separately; device experience pending",
   "scope": "all page entrypoints and shared UI families; iPhone standards, desktop family kept separately",
   "count_semantics": "records count control families, not rendered instances; file counts are coverage inventory only",
   "source_files": [
@@ -45,7 +45,7 @@
     },
     {
       "path": "src/components/Feed.tsx",
-      "sha256": "22e00ca0521dd3d9de8b729a8ccd06ae0d23fbdbe30c1cdf4042d2c6533980f5"
+      "sha256": "c567f9e1ef807623868b164a9a251f17b34851079bb48a5bd8d1b32db6ac3bcc"
     },
     {
       "path": "src/components/IOSChannelBackFrame.tsx",
@@ -105,7 +105,7 @@
     },
     {
       "path": "src/components/Player.tsx",
-      "sha256": "88b3dbdc4f7385836555410b20bb23c503364e9a60ca053a3c954a8575f3e81f"
+      "sha256": "d8a8cc08135810d7ef98c6e673bf284cff3af0dd9d8a0a20f7499ab97180722d"
     },
     {
       "path": "src/components/PlayerControls.tsx",
@@ -149,7 +149,7 @@
     },
     {
       "path": "src/ios.css",
-      "sha256": "a97903115c89a3c992a6da80237d078590fbbe3194396ada5fd1af1325b66c77"
+      "sha256": "7c7856b7912e742386d4161dee6b36f7c6672a13a32ed1c5535bdef4cb2a580f"
     },
     {
       "path": "src/pages/Category.tsx",
@@ -186,6 +186,14 @@
     {
       "path": "src/workspaceTabs.ts",
       "sha256": "b7253baf240aed0655a57919b8a8225c928f488506bd5c4dafe7bd15722d03fb"
+    },
+    {
+      "path": "src/components/PlaybackFeedback.tsx",
+      "sha256": "6ae50fe2e7bf7897013289a83fac86d9f7e7248abcdcb5bde6fb12992c191fff"
+    },
+    {
+      "path": "src/components/usePlaybackSource.ts",
+      "sha256": "43d73361733a111fb3c0decdcf712833b145b7a8b6e13a206d0d17a1caa21b75"
     }
   ],
   "cross_app_policy": "share taxonomy/evidence fields only; each app owns its numbers; no message sent to other sessions",
@@ -1725,7 +1733,7 @@
         "src/components/Player.tsx:151"
       ],
       "exceptions": "尺寸类别不同，不合并成一个大按钮",
-      "verification": "current source + final regression logs; device behavior boundary separately recorded",
+      "verification": "1.2.3 speed-width.json：390×844与844×390，hold约108、locked约158，44/36与图文4；安装数据读回通过，实际体验待用户验收",
       "dimension_fields": {
         "visible_frame": null,
         "hit_target": null,
@@ -1736,7 +1744,7 @@
       },
       "unknown_fields_policy": "null means not separately measured or not applicable; current/source/proposal carry context",
       "baseline_current": "中心66/28、64/26、56/24；部分全屏播放36/倍速32点击",
-      "current": "iOS沉浸64/28、内嵌56/24；全屏操作44/36与速度解除44；非iOS保留原字号回退；倍速锁定提示外层透明44/可见36/R4/13字20行高/横12/图文4，三态同中心与宽度；图标与当前文案整体居中，真实边缘间距4，最长文案仅用于隐藏占位，不将图标推远",
+      "current": "iOS沉浸64/28、内嵌56/24；全屏操作44/36与速度解除44；非iOS保留原字号回退；倍速提示外层透明44/可见36/R4/13字20行高/横8/图文4，按当前图标与文案自然宽度，三态同中心，移除最长文案隐藏占位",
       "selected_standard": "iOS沉浸64/28、内嵌56/24；全屏操作44/36与速度解除44；非iOS保留原字号回退"
     },
     {

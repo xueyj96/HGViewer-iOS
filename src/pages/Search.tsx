@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { appendUniqueById } from "../collections";
-import { api, isIos, isMobile, fmt } from "../api";
+import { api, isIos, isMobile } from "../api";
 import type { RankItem, VideoCard } from "../types";
 import { useStore } from "../store";
 import { IOSPageBar } from "../components/IOSPageBar";
@@ -13,7 +13,7 @@ import { IBack, IClose, IFireF, IRefresh, ISearch, ITrophy } from "../icons";
 const HOT_TAGS = ["都市", "逆袭", "古风", "系统", "后宫", "校园", "仙侠", "职场", "大男主", "御姐", "脑洞", "奇幻"];
 
 export default function Search({ active, wide }: { active: boolean; wide: boolean }) {
-  const { push, searchHist, addSearch, clearSearchHist, toast, setTab } = useStore();
+  const { push, searchHist, addSearch, clearSearchHist, setTab } = useStore();
   const [q, setQ] = useState("");
   const [submitted, setSubmitted] = useState("");
   const [items, setItems] = useState<VideoCard[]>([]);

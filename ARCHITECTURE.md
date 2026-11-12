@@ -6,7 +6,7 @@ HGViewer 用 React 渲染界面，Tauri 负责 WebView 与 Rust 的通信。iOS 
 | --- | --- |
 | 标签、页面栈、主题 | [App.tsx](src/App.tsx)、[store.tsx](src/store.tsx)、[workspaceTabs.ts](src/workspaceTabs.ts) |
 | iOS 固定顶栏、底栏、侧栏和安全区 | [IOSNavigation.tsx](src/components/IOSNavigation.tsx)、[IOSPageBar.tsx](src/components/IOSPageBar.tsx)、[ios.css](src/ios.css)、[useIOSHorizontalInsets.ts](src/components/useIOSHorizontalInsets.ts) |
-| 播放、选集和评论 | 剧集从 [Feed.tsx](src/components/Feed.tsx) 进入，图文视频从 [Posts.tsx](src/pages/Posts.tsx) 和 [Player.tsx](src/components/Player.tsx) 进入 |
+| 播放、选集和评论 | 剧集从 [Feed.tsx](src/components/Feed.tsx) 进入，来源解析与邻集预取由 [usePlaybackSource.ts](src/components/usePlaybackSource.ts) 独立持有；图文视频从 [Posts.tsx](src/pages/Posts.tsx) 和 [Player.tsx](src/components/Player.tsx) 进入 |
 | iOS 播放和转屏 | [IOSVideoSurface.tsx](src/components/IOSVideoSurface.tsx) → [ios_player.rs](src-tauri/src/ios_player.rs) → [ios_player.m](src-tauri/src/ios_player.m)；转屏由 [iosPlaybackOrientation.ts](src/components/iosPlaybackOrientation.ts) 和 [ios_orientation.rs](src-tauri/src/ios_orientation.rs) 负责 |
 | 数据请求、线路和离线下载 | [api.ts](src/api.ts) → [lib.rs](src-tauri/src/lib.rs) → [api.rs](src-tauri/src/api.rs)、[net.rs](src-tauri/src/net.rs)、[network_policy.rs](src-tauri/src/network_policy.rs)；离线任务见 [offline.rs](src-tauri/src/offline.rs)、[offline_queue.rs](src-tauri/src/offline_queue.rs)、[offline_transfer.rs](src-tauri/src/offline_transfer.rs) |
 
@@ -15,6 +15,22 @@ HGViewer 用 React 渲染界面，Tauri 负责 WebView 与 Rust 的通信。iOS 
 `App` 管理当前路由和页面栈。页面内容在独立层内滑动，`IOSNavigation` 持有固定控件层。`IOSPageBar` 把当前页面的顶栏内容挂到固定容器。顶部动作与标题一起出现。需要异步数据的动作先保持原位并禁用，例如「选集」等到分集资料到齐才可点击。
 
 `Feed` 提供侧栏按钮及其动作，固定容器负责显隐。进入和离开播放页时淡入淡出，播放页之间直接切换时更新按钮并保持侧栏位置。评论、详情和清晰度退场期间隐藏侧栏，退场完成后把键盘焦点交还原按钮。`finishMotion` 按实际动画完成时机清理；检查普通动画和「减少动态效果」两种设置。
+
+## 播放会话的组合
+
+`Feed` 保留当前作品/集数、播放意图、基准倍速与锁速、选集提交和业务面板请求。`usePlaybackProgress` 持有显示进度、一次性续播与历史写回；内容、active 会话与来源 attempt 分开，退休回调不能覆盖当前记录。同内容重试不重复首播记录，退出按 dirty 快照写回，时长回调内同步 seek，以保留原生同批旧 time 的抑制顺序。历史仍由 Store 的单一持久化入口保存，`watchHistory.ts` 集中作品去重、80 部上限和旧记录迁移策略。
+
+`usePlaybackGestures` 统一移动端画面、侧栏和进度条的临时指针所有权。它只发播放、seek、切集和锁速请求，不选择具体集、不写历史、不打开播放源。持续锁速和145ms切集提交留在 Feed；取消与提交分开，失活/换源清理不能重新播放退休内容。桌面 `PlayerControls` 保留自己的鼠标控制。
+
+`PlaybackPanels.tsx` 是模块作用域的纯展示组合，包含在线/离线详情、选集、评论与桌面 Dock。Feed 持有 requested panel、退出期间的 lastDetailPanel、分栏 controller、Sheet presence 和焦点返回；组件不复制这些状态，不申请第二个播放器或顶底栏宿主。缓存管理共用一个先 close、再 push 的动作，在线传集数列表，离线沿用已有缓存元数据。
+
+回归入口：[进度会话](tests/playback-progress.html)、[移动手势](tests/playback-gestures.html)、[来源解析](tests/playback-source.html)、[顶栏命中接管](tests/topbar-hit-target.html) 可在 `pnpm dev` 下以 iPhone UA 打开，结果显示在测试页。历史纯策略使用 `node tests/watch-history.test.mjs`；`pnpm build` 同时检查产品与测试 TypeScript。浏览器模拟桥结果不能代替 AVPlayer 真机解码和触摸验收。
+
+## 播放来源的所有者
+
+`usePlaybackSource` 统一持有本地检查结果、在线URL记录和短期预热记录。Feed提供当前选择、重试身份、相邻候选和允许预取的时机，读取有效来源；重试通过`invalidateCurrentSource`清除当前项，调用方不能改整个URL表。来源模块不控制播放意图、不写历史、不发方向请求。当前仍保留原有450ms串行预取、30秒预热有效期和失效结果不发布的规则；已发出的请求尚不支持主动abort。
+
+来源契约回归见[playback-source测试](tests/playback-source.html)，使用`pnpm dev`打开该测试页并启用iPhone UA；结果页报告本地优先、重试、迟到请求、预热复用／过期、取消与串行顺序。三App的分层、所有者和迁移边界见[结构契约v1](docs/cross-app-architecture.md)。
 
 ## 播放、转屏和数据
 

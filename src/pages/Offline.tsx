@@ -7,7 +7,7 @@ import { ShowCoverCard, ShowCoverGrid } from "../components/ShowCoverGrid";
 import { useIOSCoverMenu, type DownloadAction } from "../components/IOSCoverMenu";
 import { useOfflineStatus } from "../components/useOfflineStatus";
 import { CacheDeleteDialog, CachePageFrame, cacheSize } from "../components/CachePageFrame";
-import { CompactAction, EmptyStatus, PageStatus } from "../components/ui";
+import { CompactAction, EmptyStatus } from "../components/ui";
 import { useStore } from "../store";
 
 const episodeButton = (cached: boolean) =>

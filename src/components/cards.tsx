@@ -1,5 +1,4 @@
-import React from "react";
-import { cover, fmt, isIos } from "../api";
+import { fmt, isIos } from "../api";
 import type { VideoCard } from "../types";
 import { IHeartF, IPlayF } from "../icons";
 import { Img } from "./ui";
