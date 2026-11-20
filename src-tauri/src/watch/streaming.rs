@@ -8,7 +8,7 @@ use tauri::http::{self, Response};
 #[cfg(any(target_os = "ios", test))]
 pub(crate) struct StreamedTs {
     upstream: reqwest::Response,
-    first: Option<bytes::Bytes>,
+    primed: Option<net::PrimedMedia>,
     buffered: Option<Vec<u8>>,
     _network_slot: tokio::sync::SemaphorePermit<'static>,
     record_slot: tokio::sync::OwnedSemaphorePermit,
@@ -51,13 +51,11 @@ pub(crate) async fn open_streamed_ts(key: u64, raw: &str) -> Result<Option<Strea
     if super::source(key).is_none() || is_recorded(key, &target) {
         return Ok(None);
     }
-    let opened = net::open_media_stream(&target, &source.origin, MAX_RESOURCE, |response| {
-        streamable_length(response).is_some()
-    })
-    .await?;
+    let opened =
+        net::open_media_stream(&target, &source.origin, MAX_RESOURCE, streamable_length).await?;
     Ok(Some(StreamedTs {
         upstream: opened.response,
-        first: opened.first,
+        primed: opened.primed,
         buffered: opened.buffered,
         _network_slot: opened.permit,
         record_slot,
@@ -94,7 +92,7 @@ fn is_streamable_ts(status: http::StatusCode, headers: &http::HeaderMap, length:
 #[cfg(any(target_os = "ios", test))]
 impl StreamedTs {
     pub(crate) fn streamable_length(&self) -> Option<usize> {
-        streamable_length(&self.upstream)
+        self.primed.as_ref().map(|primed| primed.length)
     }
 
     pub(crate) async fn finish_buffered(
@@ -152,7 +150,7 @@ impl StreamedTs {
             Some((self, Vec::<u8>::new(), Some(on_first))),
             move |state| async move {
                 let (mut stream, mut saved, mut on_first) = state?;
-                let first_from_open = stream.first.take();
+                let first_from_open = stream.primed.take().map(|primed| primed.first);
                 let read_after_open = first_from_open.is_none();
                 let result = match first_from_open {
                     Some(chunk) => Ok(Some(chunk)),
@@ -215,7 +213,7 @@ mod tests {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         static NETWORK: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
-        for complete in [true, false] {
+        for (complete, one_chunk) in [(true, false), (false, false), (true, true)] {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let url = format!("http://{}/start.ts", listener.local_addr().unwrap());
             let (finish, allow_finish) = tokio::sync::oneshot::channel();
@@ -225,13 +223,18 @@ mod tests {
                 while !request.ends_with(b"\r\n\r\n") {
                     request.push(socket.read_u8().await.unwrap());
                 }
-                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nContent-Length: 6\r\nConnection: close\r\n\r\nabc").await.unwrap();
+                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nContent-Length: 6\r\nConnection: close\r\n\r\n").await.unwrap();
+                if one_chunk {
+                    socket.write_all(b"abcdef").await.unwrap();
+                    return;
+                }
+                socket.write_all(b"abc").await.unwrap();
                 allow_finish.await.unwrap();
                 if complete {
                     socket.write_all(b"def").await.unwrap();
                 }
             });
-            let upstream = reqwest::Client::builder()
+            let mut upstream = reqwest::Client::builder()
                 .no_proxy()
                 .build()
                 .unwrap()
@@ -239,9 +242,17 @@ mod tests {
                 .send()
                 .await
                 .unwrap();
+            let length = streamable_length(&upstream).unwrap();
+            let primed = tokio::time::timeout(
+                Duration::from_secs(1),
+                net::prime_media(&mut upstream, length),
+            )
+            .await
+            .unwrap()
+            .unwrap();
             let opened = StreamedTs {
                 upstream,
-                first: None,
+                primed: Some(primed),
                 buffered: None,
                 _network_slot: NETWORK.acquire().await.unwrap(),
                 record_slot: SERVE_SLOTS.clone().acquire_owned().await.unwrap(),
@@ -251,6 +262,7 @@ mod tests {
                 timing: ServeTiming::default(),
             };
             let length = opened.streamable_length().unwrap();
+            assert_eq!(length, 6);
             let (first_seen, first_report) = tokio::sync::oneshot::channel();
             let mut chunks = Box::pin(opened.chunks(length, move |_| {
                 let _ = first_seen.send(());
@@ -260,8 +272,14 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .unwrap();
-            assert_eq!(&first[..], b"abc");
             first_report.await.unwrap();
+            if one_chunk {
+                assert_eq!(&first[..], b"abcdef");
+                assert!(chunks.next().await.is_none());
+                server.await.unwrap();
+                continue;
+            }
+            assert_eq!(&first[..], b"abc");
             finish.send(()).unwrap();
             let second = chunks.next().await.unwrap();
             if complete {

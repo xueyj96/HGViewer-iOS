@@ -720,10 +720,30 @@ pub(crate) struct MediaFetchTiming {
     remaining_body_ms: Option<u128>,
 }
 
+#[cfg(any(target_os = "ios", test))]
+pub(crate) struct PrimedMedia {
+    pub length: usize,
+    pub first: bytes::Bytes,
+}
+
+#[cfg(any(target_os = "ios", test))]
+pub(crate) async fn prime_media(
+    response: &mut reqwest::Response,
+    length: usize,
+) -> Result<PrimedMedia, String> {
+    let first = response
+        .chunk()
+        .await
+        .map_err(|error| err_text(&error))?
+        .filter(|chunk| !chunk.is_empty() && chunk.len() <= length)
+        .ok_or("分片正文长度异常")?;
+    Ok(PrimedMedia { length, first })
+}
+
 #[cfg(target_os = "ios")]
 pub(crate) struct OpenedMediaStream {
     pub response: reqwest::Response,
-    pub first: Option<bytes::Bytes>,
+    pub primed: Option<PrimedMedia>,
     pub buffered: Option<Vec<u8>>,
     pub permit: tokio::sync::SemaphorePermit<'static>,
     pub timing: MediaFetchTiming,
@@ -734,7 +754,7 @@ pub(crate) async fn open_media_stream(
     url: &str,
     origin: &str,
     limit: usize,
-    needs_first_chunk: impl Fn(&reqwest::Response) -> bool + Sync,
+    streamable_length: impl Fn(&reqwest::Response) -> Option<usize> + Sync,
 ) -> Result<OpenedMediaStream, String> {
     let queued_at = Instant::now();
     let permit = MEDIA_REQUESTS
@@ -744,10 +764,10 @@ pub(crate) async fn open_media_stream(
     let queue_ms = queued_at.elapsed().as_millis();
     let referer = format!("{origin}/");
     let mut attempts = 0;
-    let (response, first, buffered, mut timing) = with_retry(true, || {
+    let (response, primed, buffered, mut timing) = with_retry(true, || {
         attempts += 1;
         let referer = &referer;
-        let needs_first_chunk = &needs_first_chunk;
+        let streamable_length = &streamable_length;
         async move {
             let started = Instant::now();
             let mut response = get(url, Duration::from_secs(20), None, Some(referer)).await?;
@@ -759,17 +779,11 @@ pub(crate) async fn open_media_stream(
                 response_headers_ms: Some(headers_at.duration_since(started).as_millis()),
                 ..Default::default()
             };
-            let (first, buffered) = if needs_first_chunk(&response) {
-                // Keep startup failures inside the retry budget until data can
-                // actually be delivered. Never retry a partially sent response.
-                let chunk = response
-                    .chunk()
-                    .await
-                    .map_err(|error| err_text(&error))?
-                    .filter(|chunk| !chunk.is_empty())
-                    .ok_or("分片未返回正文")?;
+            let (primed, buffered) = if let Some(length) = streamable_length(&response) {
+                // Capture the original size before chunk() changes the body size hint.
+                let primed = prime_media(&mut response, length).await?;
                 timing.received_first_body_byte(headers_at.elapsed());
-                (Some(chunk), None)
+                (Some(primed), None)
             } else {
                 match read_media_body(&mut response, Some(limit), Some(&mut timing)).await {
                     Ok(bytes) => (None, Some(bytes)),
@@ -779,7 +793,7 @@ pub(crate) async fn open_media_stream(
                     Err(MediaBodyError::Transport(error)) => return Err(error),
                 }
             };
-            Ok(Ok((response, first, buffered, timing)))
+            Ok(Ok((response, primed, buffered, timing)))
         }
     })
     .await??;
@@ -787,7 +801,7 @@ pub(crate) async fn open_media_stream(
     timing.attempts = attempts;
     Ok(OpenedMediaStream {
         response,
-        first,
+        primed,
         buffered,
         permit,
         timing,
