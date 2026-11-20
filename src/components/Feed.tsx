@@ -1,13 +1,16 @@
+import { IOSHeaderButton } from "./IOSHeaderButton";
 import PlaybackPanels, { type PlaybackPanel } from "./PlaybackPanels";
 import { usePlaybackProgress } from "./usePlaybackProgress";
 import { usePlaybackSource } from "./usePlaybackSource";
+import { useRevisionRecord } from "./useRevisionRecord";
+import { useOfflineAuthor } from "./useOfflineAuthor";
 import PlaybackFeedback from "./PlaybackFeedback";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, Fragment } from "react";
 import { api, isIos, isMobile, cover, fmt, fmtTime, offlineCover, type OfflineEpisode } from "../api";
-import type { Detail, Episode, Post } from "../types";
+import type { Detail, Episode, Post, VideoCard } from "../types";
 import { useStore } from "../store";
 import type { PlaybackSidebarAction } from "../playbackSidebar";
-import { Img, PlaybackError } from "./ui";
+import { Img, LoadingStatus, PlaybackError } from "./ui";
 import VideoSurface, { type VideoHandle } from "./VideoSurface";
 import IOSVideoSurface from "./IOSVideoSurface";
 import { IOSPageBar } from "./IOSPageBar";
@@ -26,6 +29,7 @@ import {
 
 type Props = {
   videoIds: number[];
+  cardsById?: ReadonlyMap<number, VideoCard>;
   startIndex?: number;
   title?: string;
   mode: "home" | "context";
@@ -37,14 +41,18 @@ type Props = {
   /** 从观看记录续播：起始集数与秒数 */
   startEp?: number;
   startTime?: number;
+  routeKey?: string;
   offlineItems?: OfflineEpisode[];
   offlineCoverIds?: number[];
 };
 
 
-export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind = "video", active, bottomInset, onBack, onNearEnd, startEp, startTime, offlineItems, offlineCoverIds }: Props) {
+export default function Feed({ videoIds, cardsById, startIndex = 0, title = "", mode, kind = "video", active, bottomInset, onBack, onNearEnd, startEp, startTime, offlineItems: initialOfflineItems, offlineCoverIds, routeKey }: Props) {
+  // Management may finish another episode while this player stays mounted.
+  const [updatedOfflineItems, setUpdatedOfflineItems] = useState<OfflineEpisode[]>();
+  const offlineItems = initialOfflineItems ? updatedOfflineItems ?? initialOfflineItems : undefined;
   const store = useStore();
-  const { isLiked, isFav, toggleLikeLocal, setFavLocal, syncFavorite, toggleFollowLocal, muted, setMuted, volume, setVolume, toast, addHistory, user, setLoginOpen } = store;
+  const { isLiked, isFav, setLikedLocal, setFavLocal, syncFavorite, setFollowedLocal, muted, setMuted, volume, setVolume, toast, addHistory, user, setLoginOpen } = store;
   const isDesktop = !isMobile;
 
   const boxRef = useRef<HTMLDivElement>(null);
@@ -53,8 +61,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const scrollIndex = useRef(startIndex);
   const pageHeight = useRef(0);
   const [epMap, setEpMap] = useState<Record<number, number>>(() => (startEp ? { [videoIds[startIndex]]: startEp } : {}));
-  const [details, setDetails] = useState<Record<number, Detail>>({});
-  const [posts, setPosts] = useState<Record<number, Post>>({});
+  const [details, setDetails] = useRevisionRecord<Detail>(store.lineRevision);
+  const [posts, setPosts] = useRevisionRecord<Post>(store.lineRevision);
 
   const [vsize, setVsize] = useState({ w: 0, h: 0 });
   const [buffered, setBuffered] = useState(0);
@@ -129,6 +137,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   }, [offlineItems]);
   const cachedShow = offlineByShow.get(curId);
   const curEp = epMap[curId] || cachedShow?.[0]?.ep || 1;
+  const offlinePlayback = useRef({ key: routeKey ?? "", id: curId, ep: curEp });
+  offlinePlayback.current = { key: routeKey ?? "", id: curId, ep: curEp };
+  const offlineAuthor = useOfflineAuthor(offlineItems ? curId : undefined, active);
   const playKey = `${curId}:${curEp}`;
   useEffect(() => () => {
     window.clearTimeout(episodeTimer.current);
@@ -145,7 +156,18 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (playbackIntent.current?.key !== surfaceKey) playbackIntent.current = undefined;
   }, [surfaceKey]);
   const playbackTap = usePlaybackTap(
-    () => videoRef.current?.toggle(),
+    () => {
+      const player = videoRef.current;
+      if (player) { player.toggle(); return; }
+      // A tap on the placeholder still belongs to this episode while its URL resolves.
+      if (!isIos || !active || (kind !== "video" && !post?.video_url)) return;
+      const playing = !(playbackIntent.current?.key === surfaceKey
+        ? playbackIntent.current.playing : playbackStarted.current);
+      playbackIntent.current = { key: surfaceKey, playing };
+      if (playing) playbackStarted.current = true;
+      setPaused(!playing);
+      setWaiting(playing);
+    },
     () => { setPanel(null); setClear((value) => !value); },
     `${active}:${surfaceKey}`,
   );
@@ -158,14 +180,17 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const previousEpisode = currentEpisodeIndex > 0 ? orderedEpisodes[currentEpisodeIndex - 1] : undefined;
   const nextEpisode = currentEpisodeIndex >= 0 ? orderedEpisodes[currentEpisodeIndex + 1] : undefined;
 
-  const candidates = useMemo(() => [
-      { id: videoIds[index + 1], ep: epMap[videoIds[index + 1]] ?? offlineByShow.get(videoIds[index + 1])?.[0]?.ep ?? 1 },
-      { id: curId, ep: nextEpisode?.ep_num },
-      { id: videoIds[index - 1], ep: epMap[videoIds[index - 1]] ?? offlineByShow.get(videoIds[index - 1])?.[0]?.ep ?? 1 },
-      { id: curId, ep: previousEpisode?.ep_num },
-    ], [videoIds, index, epMap, offlineByShow, curId, nextEpisode?.ep_num, previousEpisode?.ep_num]);
-  const { stream, playUrl, nativeSource, offlineEpisode, invalidateCurrentSource } = usePlaybackSource({
-    kind, active, curId, curEp, retry, offlineItems, offlineByShow, posts, detail, candidates,
+  const candidates = useMemo(() => {
+    const adjacentShow = (id: number | undefined) => ({
+      id, ep: id === undefined ? undefined : epMap[id] ?? offlineByShow.get(id)?.[0]?.ep ?? 1,
+    });
+    const nextShow = adjacentShow(videoIds[index + 1]);
+    const nextInShow = { id: curId, ep: nextEpisode?.ep_num };
+    const forward = mode === "home" ? [nextShow, nextInShow] : [nextInShow, nextShow];
+    return [...forward, adjacentShow(videoIds[index - 1]), { id: curId, ep: previousEpisode?.ep_num }];
+  }, [mode, videoIds, index, epMap, offlineByShow, curId, nextEpisode?.ep_num, previousEpisode?.ep_num]);
+  const { stream, playUrl, nativeSource, offlineEpisode, invalidateCurrentSource, startupTiming } = usePlaybackSource({
+    kind, active, curId, curEp, retry, lineRevision: store.lineRevision, offlineItems, offlineByShow, posts, detail, candidates,
     readyToPreload: isIos && active && duration > 0 && !paused && !waiting && !err,
     onError: setErr,
   });
@@ -187,11 +212,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         episodes: [] as Episode[],
       }
     : {
-        title: offlineEpisode?.title || detail?.title || "",
-        cover: detail?.cover || "",
+        title: offlineEpisode?.title || detail?.title || cardsById?.get(curId)?.title || "",
+        cover: cardsById?.get(curId)?.cover || detail?.cover || "",
         desc: detail?.description || "",
-        author: detail?.author?.name || "黄果短剧",
-        authorId: detail?.author?.id || -1,
+        author: (offlineItems ? offlineAuthor?.name : detail?.author?.name) || (offlineItems ? "" : "黄果短剧"),
+        authorId: (offlineItems ? offlineAuthor?.id : detail?.author?.id) || -1,
         tags: detail?.tags || [],
         score: detail?.score || 0,
         like: detail?.counts?.like ?? 0,
@@ -274,7 +299,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, index, videoIds]);
+  }, [kind, index, videoIds, store.lineRevision]);
 
   /* 吃瓜帖子：直接拿帖子详情（含 video_url） */
   useEffect(() => {
@@ -289,7 +314,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, index, videoIds, retry]);
+  }, [kind, index, videoIds, retry, store.lineRevision]);
 
   const onVideoEnded = () => {
     if (offlineItems) {
@@ -307,7 +332,25 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (nextConsecutiveEpisode) pickEp(nextConsecutiveEpisode.ep_num);
   };
 
+  // One automatic re-resolution per selected episode/line; explicit retry renews the budget.
+  const sourceRecovery = useMemo(() => ({ used: false }), [playKey, store.lineRevision]);
+  const playbackError = (message: string) => {
+    if (!active) return;
+    if (kind !== "video" || offlineItems || offlineEpisode || !playUrl || sourceRecovery.used) {
+      setErr(message);
+      return;
+    }
+    sourceRecovery.used = true;
+    const playing = videoRef.current?.isPlaying() ?? !paused;
+    progress.prepareRecovery(time);
+    playbackIntent.current = { key: `${playKey}:${retry + 1}`, playing };
+    invalidateCurrentSource();
+    setErr(""); setWaiting(playing);
+    setRetry((value) => value + 1);
+  };
+
   const retryPlayback = () => {
+    sourceRecovery.used = false;
     playbackStarted.current = true;
     setErr(""); setWaiting(true); setPaused(false);
     if (kind === "post") {
@@ -321,12 +364,21 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   /* 切换条目/集数时重置播放状态 */
   useEffect(() => {
     setBuffered(0); setErr("");
-    setWaiting(playbackStarted.current); setPaused(!playbackStarted.current); setDescOpen(false);
+    const playing = playbackIntent.current?.key === surfaceKey ? playbackIntent.current.playing : playbackStarted.current;
+    setWaiting(playing); setPaused(!playing); setDescOpen(false);
     setVsize({ w: 0, h: 0 });
     setQuality(null);
     setQualityLevel(-1);
     setPanel((current) => current === "quality" ? null : current);
   }, [playKey, retry]);
+
+  // Refresh remote metadata/source feedback without resetting selection or playback intent.
+  useEffect(() => {
+    if (offlineItems) return;
+    setErr("");
+    setQuality(null);
+    setQualityLevel(-1);
+  }, [store.lineRevision, offlineItems]);
 
   /* 非激活时暂停 */
   useEffect(() => {
@@ -440,7 +492,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   const onLike = () => {
     if (!curId) return;
-    const on = toggleLikeLocal(curId);
+    const on = !isLiked(curId);
+    setLikedLocal(curId, on);
     setHeartBurst((n) => n + 1);
     toast(on ? "已加入喜欢" : "已取消喜欢", on ? "heart" : "info");
     if (requireLogin()) { if (kind === "post") api.postLike(curId, on).catch(() => {}); else api.like(curId, curEp, on).catch(() => {}); }
@@ -457,7 +510,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const onFollow = () => {
     const uid = meta.authorId > 0 ? meta.authorId : undefined;
     if (!uid) return;
-    const on = toggleFollowLocal(uid);
+    const on = !store.follows.includes(uid);
+    setFollowedLocal(uid, on);
     toast(on ? `已关注 ${detail?.author?.name}` : "已取消关注", on ? "ok" : "info");
     if (requireLogin()) api.follow(uid, on).catch(() => {});
   };
@@ -534,7 +588,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     onWaiting: () => setWaiting(true),
     onEnded: onVideoEnded,
     onQuality: setQuality,
-    onError: setErr,
+    onError: playbackError,
   };
   const playbackGestures = {
     onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => onDown(event),
@@ -607,13 +661,24 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         {boundaryTravel > 0 && <div aria-hidden style={{ height: boundaryTravel }} />}
         {videoIds.map((vid, i) => {
           const isActive = i === index;
+          const videoUrl = isActive ? playUrl : "";
+          const isCached = offlineByShow.has(vid);
+          const preview = isCached ? offlineCover(vid)
+            : cardsById?.get(vid)?.cover || details[vid]?.cover || posts[vid]?.cover || "";
           return (
-            <section key={vid} className="relative w-full h-full snap-start snap-always overflow-hidden">
-              {isActive && playUrl ? (
+            <section key={vid} data-has-preview={!!preview} className="relative w-full h-full snap-start snap-always overflow-hidden">
+              {(!videoUrl || isIos) && (
+                <div className="hg-feed-poster absolute inset-0" style={{ touchAction: videoTouchAction }}
+                  {...(isActive && !videoUrl ? playbackGestures : undefined)}>
+                  {preview && <Img key={preview} src={preview} raw={isCached} eager={Math.abs(i - index) <= 1} />}
+                  <div className="absolute inset-0 bg-black/25" />
+                </div>
+              )}
+              {videoUrl && (
                 <div className="hg-feed-video absolute inset-0" style={{ touchAction: videoTouchAction }}
                   {...playbackGestures}>
                   {isIos ? active && (
-                    <IOSVideoSurface key={surfaceKey} ref={videoRef} source={nativeSource} viewport={false} {...playback}
+                    <IOSVideoSurface key={surfaceKey} ref={videoRef} source={nativeSource} viewport={false} startupTiming={startupTiming} {...playback}
                       autoPlay={playbackIntent.current?.key === surfaceKey ? playbackIntent.current.playing : playbackStarted.current}
                       onPlaybackIntentChange={(playing) => {
                         if (playing) playbackStarted.current = true;
@@ -622,18 +687,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       enterDirection={episodeEntry?.key === playKey ? episodeEntry.direction : undefined}
                       onEnter={() => setEpisodeEntry(undefined)} />
                   ) : (
-                    <VideoSurface key={surfaceKey} ref={videoRef} src={playUrl} poster={posterUrl}
-                      autoPlay={active && playbackStarted.current}
+                    <VideoSurface key={surfaceKey} ref={videoRef} src={videoUrl} poster={posterUrl}
+                      autoPlay={active && (playbackIntent.current?.key === surfaceKey ? playbackIntent.current.playing : playbackStarted.current)}
                       fit={isDesktop || wideVideo ? "contain" : "cover"}
                       onClick={() => { if (isDesktop) videoRef.current?.toggle(); }}
                       {...playback} />
                   )}
-                </div>
-              ) : (
-                <div className="absolute inset-0" style={{ touchAction: videoTouchAction }}
-                  {...(isActive ? playbackGestures : undefined)}>
-                  <Img src={offlineByShow.has(vid) ? offlineCover(vid) : details[vid]?.cover || posts[vid]?.cover || ""} raw={offlineByShow.has(vid)} eager={Math.abs(i - index) <= 1} />
-                  <div className="absolute inset-0" style={{ background: "rgba(0,0,0,.25)" }} />
                 </div>
               )}
 
@@ -692,10 +751,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               <div className="absolute z-20 flex flex-col items-center desktop-social">
                 <div className="desktop-browse-inline">
                   <button onClick={() => go(-1)} disabled={index === 0} aria-label="上一个" title="上一个 ↑">
-                    <IChevronUp size={19} strokeWidth={1.8} />
+                    <IChevronUp size={19} />
                   </button>
                   <button onClick={() => go(1)} disabled={index >= videoIds.length - 1} aria-label="下一个" title="下一个 ↓">
-                    <IChevronDown size={19} strokeWidth={1.8} />
+                    <IChevronDown size={19} />
                   </button>
                   <small>{String(index + 1).padStart(2, "0")} / {String(videoIds.length).padStart(2, "0")}</small>
                 </div>
@@ -733,7 +792,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               {!fs && isDesktop && (
               <div className="desktop-video-meta">
                 <div className="flex items-center gap-2">
-                  <span className="text-[15px] font-bold text-white tsh truncate">@{meta.author}</span>
+                  <button type="button" disabled={meta.authorId <= 0}
+                    onClick={() => store.push({ kind: "author", id: meta.authorId, name: meta.author })}
+                    aria-label={`查看作者 ${meta.author} 的全部作品`}
+                    className="min-h-11 truncate text-[15px] font-bold text-white tsh pressable">@{meta.author}</button>
                   {episodes.length > 0 && (
                     <span className="shrink-0 px-1.5 py-px rounded-md text-[10px] font-bold text-white"
                       style={{ background: "rgba(255,255,255,.16)" }}>
@@ -808,7 +870,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
               )}
 
               {/* 暂停 / 缓冲 */}
-              {isIos && isActive && !err && <PlaybackFeedback key={playKey} paused={paused} visible={!waiting} />}
+              {isIos && isActive && !err && <PlaybackFeedback key={playKey} paused={paused} visible={!waiting || paused} />}
               {!isIos && isActive && paused && !err && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
                   <span className="hg-play-glyph w-[66px] h-[66px] rounded-full flex items-center justify-center backdrop-blur-md"
@@ -818,7 +880,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </div>
               )}
               {isActive && waiting && !err && !paused && (kind === "video" || !post || !!post.video_url) && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none"><div className="w-9 h-9 spinner" /></div>
+                <div key={surfaceKey} className="hg-feed-loading absolute inset-0 z-10 grid place-items-center pointer-events-none">
+                  <LoadingStatus variant="media" label="正在加载视频" />
+                </div>
               )}
               {isActive && err && <PlaybackError message={err} onRetry={retryPlayback} />}
             </section>
@@ -829,10 +893,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
       {isIos && !fs && mode === "context" && (
         <IOSPageBar label={offlineItems ? "离线播放工具" : "播放工具"} onBack={onBack} overMedia endAction={kind === "video" && (
-          <button type="button" aria-label="选集" disabled={episodes.length === 0} onClick={() => setPanel("episodes")}
+          <IOSHeaderButton type="button" aria-label="选集" disabled={episodes.length === 0} onClick={() => setPanel("episodes")}
             className="hg-ios-floating-button hg-ios-header-square hg-ios-media-top-button grid place-items-center disabled:opacity-50">
             <IList size={16} aria-hidden="true" />
-          </button>
+          </IOSHeaderButton>
         )}>
           <h1 className="min-w-0 flex-1 truncate text-center text-[13px] font-semibold">
             {offlineItems ? "离线播放" : title || "剧集播放"}
@@ -863,8 +927,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         />
       )}
 
-      {/* 长按、待锁定和已锁定共用同一个屏幕中心位置。 */}
-      {!isDesktop && (!clear || holdSpeed) && (holdSpeed || speedLock || rate !== 1) && (
+      {/* 长按、待锁定和已锁定共用中心位置；沉浸模式隐藏提示，保留倍速状态。 */}
+      {!isDesktop && !clear && (holdSpeed || speedLock || rate !== 1) && (
         <button type="button"
           disabled={holdSpeed}
           onClick={() => { if (speedLock) setSpeedLock(false); else setRate(1); }}
@@ -872,8 +936,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             flex items-center whitespace-nowrap font-semibold
             ${isIos ? "" : "gap-2 rounded-full px-4 h-10 text-[12px]"}
             ${holdSpeed ? "pointer-events-none" : "pressable"}
-            ${isIos ? "" : lockArmed || speedLock ? "bg-primary text-on-primary" : "hg-chip-strong"}`}>
-          <span className={isIos ? `hg-ios-speed-dismiss-face ${lockArmed || speedLock ? "bg-primary text-on-primary" : "hg-chip-strong"}` : "contents"}>
+            ${isIos ? "" : "hg-chip-strong"}`}>
+          <span className={isIos ? "hg-ios-speed-dismiss-face hg-chip-strong" : "contents"}>
               {lockArmed || speedLock ? <ILockF size={16} /> : <IBoltF size={isIos ? 16 : 15} />}
               <span>{effRate}× {holdSpeed
                 ? (lockArmed ? "松手锁定" : "上滑锁定")
@@ -939,9 +1003,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         cachedEpisodesPage={cachedEpisodesPage} offlineItems={!!offlineItems} curId={curId} curEp={curEp} playKey={playKey}
         kind={kind} meta={meta} episodes={episodes} descending={descending} articleHtml={articleHtml} hot={post?.hot}
         hasOfflineCover={offlineCoverIds?.includes(curId) ?? false}
-        cachedBytes={cachedShow?.reduce((sum, item) => sum + item.bytes, 0) ?? 0}
-        followed={store.follows.includes(meta.authorId)} openCache={openCache} onCacheManagement={openCacheManagement}
+        followed={store.follows.includes(meta.authorId)} openCache={openCache} active={active} offlineSnapshot={offlineItems} onOfflineItemsChange={setUpdatedOfflineItems}
+        onDeleteOfflineEpisode={(id, ep) => store.deleteOffline(id, ep, routeKey ? () => offlinePlayback.current : undefined)}
+        onPlayOfflineEpisode={(ep, items) => { setUpdatedOfflineItems(items); pickEp(ep); }}
         onPick={pickEp} onFollow={onFollow} onSort={toggleEpisodeOrder} onClose={() => setPanel(null)}
+        onAuthor={() => { if (meta.authorId > 0) store.push({ kind: "author", id: meta.authorId, name: meta.author }); }}
         onSelectDetail={setPanel} onCommentsPresence={setCommentsPresent} onDetailsPresence={setDetailsPresent} />
 
     </div>

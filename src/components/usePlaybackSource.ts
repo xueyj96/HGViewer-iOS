@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, isIos, mediaUrl, offlineMedia, watchedPlaylist, type OfflineEpisode } from "../api";
 import type { Detail, Post } from "../types";
-import { preloadIOSPlayback } from "./IOSVideoSurface";
+import { preloadIOSPlayback, type PlaybackStartupTiming } from "./IOSVideoSurface";
+import { useRevisionRecord } from "./useRevisionRecord";
 
 type Candidate = { id: number | undefined; ep: number | undefined };
 type Options = {
@@ -10,6 +11,7 @@ type Options = {
   curId: number;
   curEp: number;
   retry: number;
+  lineRevision?: number;
   offlineItems?: OfflineEpisode[];
   offlineByShow: Map<number, OfflineEpisode[]>;
   posts: Record<number, Post>;
@@ -38,12 +40,13 @@ function onlineSource(stream: Stream) {
 }
 
 /** Owns local-first source resolution and bounded adjacent preloads, not playback intent. */
-export function usePlaybackSource({ kind, active, curId, curEp, retry, offlineItems, offlineByShow,
+export function usePlaybackSource({ kind, active, curId, curEp, retry, lineRevision = 0, offlineItems, offlineByShow,
   posts, detail, candidates, readyToPreload, onError: setErr }: Options) {
   const playKey = `${curId}:${curEp}`;
-  const surfaceKey = `${playKey}:${retry}`;
-  const [playUrls, setPlayUrls] = useState<Record<string, Stream>>({});
-  const warmStreams = useRef(new Map<string, { promise: Promise<Stream>; expires: number }>());
+  const surfaceKey = `${lineRevision}:${playKey}:${retry}`;
+  const startupTiming = useMemo<PlaybackStartupTiming>(() => ({ selectedAt: performance.now() }), [surfaceKey, active]);
+  const [playUrls, setPlayUrls] = useRevisionRecord<Stream>(lineRevision);
+  const warmStreams = useMemo(() => new Map<string, { promise: Promise<Stream>; expires: number }>(), [lineRevision]);
   const [cacheChoice, setCacheChoice] = useState<{ key: string; episode: OfflineEpisode | null }>();
   const checkCache = isIos && kind === "video" && !offlineItems;
   const cacheReady = !checkCache || cacheChoice?.key === surfaceKey;
@@ -59,7 +62,7 @@ export function usePlaybackSource({ kind, active, curId, curEp, retry, offlineIt
 
   useEffect(() => {
     if (stream?.watchKey && detail) {
-      void api.watchDetails(stream.watchKey, detail.title, (detail.episodes || []).map((item) => item.ep_num), detail.cover).catch(() => {});
+      void api.watchDetails(stream.watchKey, detail.title, (detail.episodes || []).map((item) => item.ep_num), detail.cover, detail.author).catch(() => {});
     }
   }, [stream?.watchKey, detail]);
 
@@ -73,33 +76,51 @@ export function usePlaybackSource({ kind, active, curId, curEp, retry, offlineIt
     let alive = true;
     const resolve = async () => {
       if (checkCache) {
+        const started = performance.now();
         const episode = await api.offlineEpisode(curId, curEp).catch(() => null);
         if (!alive) return;
+        startupTiming.cacheMs = performance.now() - started;
+        if (episode) startupTiming.source = "local";
         setCacheChoice({ key: surfaceKey, episode });
         if (episode) {
           return;
         }
       }
-      if (playUrls[playKey]) return;
-      const warm = warmStreams.current.get(playKey);
-      warmStreams.current.delete(playKey);
-      const resolved = warm && warm.expires > Date.now()
-        ? await warm.promise.catch(() => resolveStream(curId, curEp))
-        : await resolveStream(curId, curEp);
+      if (playUrls[playKey]) {
+        startupTiming.source = "retained";
+        return;
+      }
+      const started = performance.now();
+      const warm = warmStreams.get(playKey);
+      let source: PlaybackStartupTiming["source"] = "fresh";
+      let resolved: Stream;
+      if (warm && warm.expires > Date.now()) {
+        source = "preloaded";
+        resolved = await warm.promise.catch((error) => {
+          if (!alive) throw error;
+          source = "fresh_after_preload_failure";
+          return resolveStream(curId, curEp);
+        });
+      } else {
+        resolved = await resolveStream(curId, curEp);
+      }
       if (!alive) return;
+      if (warm && warmStreams.get(playKey) === warm) warmStreams.delete(playKey);
+      startupTiming.source = source;
+      startupTiming.resolveMs = performance.now() - started;
       setPlayUrls((m) => ({ ...m, [playKey]: resolved }));
     };
     void resolve().catch((e) => { if (alive) setErr((e as Error).message || "取播放地址失败"); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, curId, curEp, retry, isIos && active]);
+  }, [kind, curId, curEp, retry, isIos && active, lineRevision]);
 
   useEffect(() => {
     if (!readyToPreload) return;
     let alive = true;
     const keep = new Set([playKey, ...candidates.map(({ id, ep }) => `${id}:${ep}`)]);
-    for (const key of warmStreams.current.keys()) if (!keep.has(key)) warmStreams.current.delete(key);
-    const preload = async ({ id, ep }: typeof candidates[number]) => {
+    for (const key of warmStreams.keys()) if (!keep.has(key)) warmStreams.delete(key);
+    const preload = async ({ id, ep }: typeof candidates[number], priority: number) => {
       if (!alive || document.hidden || !id || !ep) return;
       if (kind === "post") {
         const url = posts[id]?.video_url;
@@ -114,25 +135,35 @@ export function usePlaybackSource({ kind, active, curId, curEp, retry, offlineIt
         await preloadIOSPlayback({ kind: "offline", id, ep, mp4: local.mp4 });
       } else if (!offlineItems) {
         const key = `${id}:${ep}`;
-        const cached = warmStreams.current.get(key);
+        const cached = warmStreams.get(key);
         const promise = playUrls[key] ? Promise.resolve(playUrls[key]) :
           cached && cached.expires > Date.now() ? cached.promise : resolveStream(id, ep);
-        warmStreams.current.set(key, { promise, expires: Date.now() + 30_000 });
+        warmStreams.set(key, { promise, expires: Date.now() + 30_000 });
         try {
           const source = await promise;
-          if (alive) await preloadIOSPlayback(onlineSource(source));
+          if (alive && !document.hidden) {
+            await preloadIOSPlayback(onlineSource(source), {
+              prefetchSegment: priority < 2,
+              prepareStandby: priority < 2,
+            });
+          }
         } catch {
-          if (warmStreams.current.get(key)?.promise === promise) warmStreams.current.delete(key);
+          if (warmStreams.get(key)?.promise === promise) warmStreams.delete(key);
         }
       }
     };
     const timer = window.setTimeout(() => {
       // Prioritize forward playback and keep background requests serial.
-      void (async () => { for (const candidate of candidates) await preload(candidate); })();
+      void (async () => {
+        for (const [index, candidate] of candidates.entries()) await preload(candidate, index);
+      })();
     }, 450);
     return () => { alive = false; window.clearTimeout(timer); };
-  }, [readyToPreload, kind, curId, playKey, candidates, offlineByShow, offlineItems, posts, playUrls]);
+  }, [readyToPreload, kind, curId, playKey, candidates, offlineByShow, offlineItems, posts, playUrls, warmStreams]);
 
-  const invalidateCurrentSource = () => setPlayUrls(({ [playKey]: _discard, ...remaining }) => remaining);
-  return { stream, playUrl, nativeSource, offlineEpisode, invalidateCurrentSource };
+  const invalidateCurrentSource = () => {
+    warmStreams.delete(playKey);
+    setPlayUrls(({ [playKey]: _discard, ...remaining }) => remaining);
+  };
+  return { stream, playUrl, nativeSource, offlineEpisode, invalidateCurrentSource, startupTiming };
 }

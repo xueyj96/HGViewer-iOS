@@ -1,5 +1,6 @@
 use crate::{media, net, network_policy, offline, watch};
 use bytes::Bytes;
+use futures_util::TryStreamExt;
 use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Full, StreamBody};
 use hyper::{
     body::{Frame, Incoming},
@@ -12,53 +13,116 @@ use hyper_util::rt::{TokioIo, TokioTimer};
 use serde::Serialize;
 use std::{
     convert::Infallible,
-    sync::{Arc, Mutex},
-    time::Duration,
+    sync::{Arc, Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 use tauri::Manager;
 use tokio::{
     net::TcpListener,
+    sync::{Mutex as AsyncMutex, Notify},
     task::{AbortHandle, JoinSet},
 };
 use uuid::Uuid;
 
-type Body = UnsyncBoxBody<Bytes, reqwest::Error>;
+type Body = UnsyncBoxBody<Bytes, std::io::Error>;
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HlsMediaResponseTiming {
+    request_ms: u128,
+    bytes: usize,
+    streamed: bool,
+    watch: Option<watch::ServeTiming>,
+}
+
+pub(crate) type HlsMediaTiming = Arc<OnceLock<HlsMediaResponseTiming>>;
 
 #[derive(Default)]
-pub struct Sessions(Mutex<(u64, bool, Option<AbortHandle>)>);
-
+struct PlaybackSession {
+    token: u64,
+    active: bool,
+    task: Option<AbortHandle>,
+    reader: Option<offline::ReadLease>,
+    retiring: Vec<offline::ReadLease>,
+    media_timing: Option<HlsMediaTiming>,
+}
+#[derive(Default)]
+pub struct Sessions(Mutex<PlaybackSession>);
 impl Sessions {
     pub fn reserve(&self, token: u64) -> bool {
         let mut session = self.0.lock().unwrap();
-        if token <= session.0 {
+        if token <= session.token {
             return false;
         }
-        if let Some(task) = session.2.take() {
+        if let Some(task) = session.task.take() {
             task.abort();
         }
-        session.0 = token;
-        session.1 = true;
-        true
-    }
-
-    pub fn keep(&self, token: u64, task: AbortHandle) -> bool {
-        let mut session = self.0.lock().unwrap();
-        if session.0 != token || !session.1 {
-            task.abort();
-            return false;
+        // The previous AVPlayer still exists until the main-thread replacement/close completes.
+        if let Some(reader) = session.reader.take() {
+            session.retiring.push(reader);
         }
-        session.2 = Some(task);
+        session.media_timing = None;
+        session.token = token;
+        session.active = true;
         true
     }
-
-    pub fn close(&self, token: u64) {
+    pub fn active_token(&self) -> Option<u64> {
+        let session = self.0.lock().unwrap();
+        session.active.then_some(session.token)
+    }
+    pub fn is_current(&self, token: u64) -> bool {
+        let session = self.0.lock().unwrap();
+        session.active && session.token == token
+    }
+    pub fn keep(
+        &self,
+        token: u64,
+        task: Option<AbortHandle>,
+        reader: Option<offline::ReadLease>,
+        media_timing: Option<HlsMediaTiming>,
+    ) -> bool {
         let mut session = self.0.lock().unwrap();
-        if token >= session.0 {
-            session.0 = token;
-            session.1 = false;
-            if let Some(task) = session.2.take() {
+        if session.token != token || !session.active {
+            if let Some(task) = task {
                 task.abort();
             }
+            return false;
+        }
+        session.task = task;
+        session.reader = reader;
+        session.media_timing = media_timing;
+        true
+    }
+    pub(crate) fn take_first_hls_media_response(
+        &self,
+        token: u64,
+    ) -> Option<HlsMediaResponseTiming> {
+        let mut session = self.0.lock().unwrap();
+        if session.token != token || !session.active {
+            return None;
+        }
+        let timing = session.media_timing.as_ref()?.get()?.clone();
+        session.media_timing = None;
+        Some(timing)
+    }
+
+    pub fn opened(&self, token: u64) {
+        let mut session = self.0.lock().unwrap();
+        if session.token == token && session.active {
+            session.retiring.clear();
+        }
+    }
+    pub fn close(&self, token: u64) {
+        let mut session = self.0.lock().unwrap();
+        if token >= session.token {
+            session.token = token;
+            session.active = false;
+            if let Some(task) = session.task.take() {
+                task.abort();
+            }
+            session.media_timing.take();
+            session.reader.take();
+            session.retiring.clear();
         }
     }
 }
@@ -167,12 +231,27 @@ impl Manifest {
     }
 }
 
-struct Gateway {
+const PREFETCH_LIMIT: usize = 4 * 1024 * 1024;
+const PREFETCH_TIMEOUT: Duration = Duration::from_secs(3);
+const PREFETCH_JOIN_BUDGET: Duration = Duration::from_millis(120);
+const PREFETCH_TTL: Duration = Duration::from_secs(30);
+static SEGMENT_PREFETCH: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
+struct SegmentPrefetch {
+    url: String,
+    body: Arc<AsyncMutex<Option<watch::PrefetchedMedia>>>,
+    cancel: Arc<Notify>,
+}
+
+pub(crate) struct Gateway {
     app: tauri::AppHandle,
     capability: String,
     base: String,
     media: Media,
     manifest: Option<Manifest>,
+    _offline_lease: Option<offline::ReadLease>,
+    media_timing: Option<HlsMediaTiming>,
+    prefetched_segment: OnceLock<SegmentPrefetch>,
 }
 
 fn body(bytes: impl Into<Bytes>) -> Body {
@@ -198,9 +277,26 @@ fn buffered(response: Response<Vec<u8>>, head: bool) -> Response<Body> {
 }
 
 async fn remote_playlist(url: &str, watch_key: Option<u64>, origin: &str) -> Response<Vec<u8>> {
+    fetch_hls_resource(url, watch_key, origin, None, None).await
+}
+
+async fn fetch_hls_resource(
+    url: &str,
+    watch_key: Option<u64>,
+    origin: &str,
+    timing: Option<&mut watch::ServeTiming>,
+    prefetched: Option<watch::PrefetchedMedia>,
+) -> Response<Vec<u8>> {
     let query = format!("u={}", media::enc(url));
     if let Some(key) = watch_key {
-        watch::serve(&format!("/watch/{key}/seg"), &query, origin).await
+        watch::serve_with_timing(
+            &format!("/watch/{key}/seg"),
+            &query,
+            origin,
+            timing,
+            prefetched,
+        )
+        .await
     } else {
         media::handle("/seg", &query, origin).await
     }
@@ -233,7 +329,7 @@ async fn progressive(url: &str, range: Option<&str>, head: bool) -> Response<Bod
             match response.chunk().await {
                 Ok(Some(chunk)) => Some((Ok(Frame::data(chunk)), Some(response))),
                 Ok(None) => None,
-                Err(err) => Some((Err(err), None)),
+                Err(err) => Some((Err(std::io::Error::other(err)), None)),
             }
         });
         StreamBody::new(stream).boxed_unsync()
@@ -275,7 +371,204 @@ async fn is_progressive(url: &url::Url) -> Result<bool, String> {
     Ok(first.is_some_and(|chunk| chunk.get(4..8) == Some(b"ftyp")))
 }
 
+// A segment is eligible only when the media playlist names a standalone
+// resource and has a fixed end. An absent match is a normal cold open.
+fn first_segment_uri(playlist: &str) -> Option<&str> {
+    if !playlist.lines().any(|line| line.trim() == "#EXT-X-ENDLIST") {
+        return None;
+    }
+    let mut starts_segment = false;
+    for line in playlist.lines().map(str::trim) {
+        if line.starts_with("#EXT-X-BYTERANGE:") {
+            return None;
+        }
+        if line.starts_with("#EXTINF:") {
+            starts_segment = true;
+        } else if !line.is_empty() && !line.starts_with('#') {
+            return starts_segment.then_some(line);
+        }
+    }
+    None
+}
+
 impl Gateway {
+    fn watch_target(&self, key: u64, entry: &str) -> Option<String> {
+        let prefix = format!("{}/watch/{key}/seg?", self.base);
+        let raw = media::target_from_query(entry.strip_prefix(&prefix)?);
+        network_policy::parse_target(&raw)
+            .ok()
+            .map(|url| url.to_string())
+    }
+
+    pub(crate) async fn prefetch_first_segment(&self) {
+        let (
+            Media::Hls {
+                watch_key: Some(key),
+                ..
+            },
+            Some(manifest),
+        ) = (&self.media, &self.manifest)
+        else {
+            return;
+        };
+        let Ok(_permit) = SEGMENT_PREFETCH.try_acquire() else {
+            return;
+        };
+        let _ = tokio::time::timeout(PREFETCH_TIMEOUT, async {
+            let key = *key;
+            let Some(source) = watch::source(key) else {
+                return;
+            };
+            // Try the first advertised rendition. Leave rendition selection to AVPlayer.
+            let child;
+            let playlist = if let Some((_, uri, _)) = manifest.variants.first() {
+                let Some(url) = manifest
+                    .text
+                    .lines()
+                    .nth(*uri)
+                    .and_then(|uri| self.watch_target(key, uri))
+                else {
+                    return;
+                };
+                let response = remote_playlist(&url, Some(key), &self.base).await;
+                if !response.status().is_success() {
+                    return;
+                }
+                let Ok(text) = String::from_utf8(response.into_body()) else {
+                    return;
+                };
+                child = text;
+                &child
+            } else {
+                &manifest.text
+            };
+            let Some(url) = first_segment_uri(playlist).and_then(|uri| self.watch_target(key, uri))
+            else {
+                return;
+            };
+            if watch::source(key).is_none() || watch::is_recorded(key, &url) {
+                return;
+            }
+            let body = Arc::new(AsyncMutex::new(None));
+            let mut result = body.lock().await;
+            let cancel = Arc::new(Notify::new());
+            if self
+                .prefetched_segment
+                .set(SegmentPrefetch {
+                    url: url.clone(),
+                    body: body.clone(),
+                    cancel: cancel.clone(),
+                })
+                .is_err()
+            {
+                return;
+            }
+            let fetched = tokio::select! {
+                biased;
+                _ = cancel.notified() => return,
+                result = net::fetch_media_bounded(&url, &source.origin, PREFETCH_LIMIT) => result,
+            };
+            if let Ok((kind, bytes, final_url, true)) = fetched {
+                if !bytes.is_empty() && watch::source(key).is_some() {
+                    *result = Some((kind, bytes, final_url));
+                    let unused = Arc::downgrade(&body);
+                    tokio::spawn(async move {
+                        tokio::time::sleep(PREFETCH_TTL).await;
+                        if let Some(body) = unused.upgrade() {
+                            body.lock().await.take();
+                        }
+                    });
+                }
+            }
+        })
+        .await;
+    }
+
+    async fn hls_resource(
+        &self,
+        url: &str,
+        watch_key: Option<u64>,
+        head: bool,
+        full_get: bool,
+    ) -> Response<Body> {
+        let pending = self
+            .media_timing
+            .as_ref()
+            .filter(|timing| !head && timing.get().is_none());
+        let started = pending.map(|_| Instant::now());
+        let mut watch = pending
+            .and(watch_key)
+            .map(|_| watch::ServeTiming::default());
+        let prefetched = match self.prefetched_segment.get() {
+            Some(prefetch) if !head && prefetch.url == url => {
+                match tokio::time::timeout(PREFETCH_JOIN_BUDGET, prefetch.body.lock()).await {
+                    Ok(mut body) => body.take(),
+                    Err(_) => {
+                        prefetch.cancel.notify_one();
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+        // Stream only the startup resource. Later requests keep the established
+        // buffered path, including byte-range and playlist rewriting behavior.
+        let mut early_response = None;
+        if full_get && pending.is_some() && prefetched.is_none() {
+            if let Some(key) = watch_key {
+                let stream = match watch::open_streamed_ts(key, url).await {
+                    Ok(stream) => stream,
+                    // The shared network retries have already been spent.
+                    Err(_) => return error(StatusCode::BAD_GATEWAY),
+                };
+                if let Some(stream) = stream {
+                    if let Some(bytes) = stream.streamable_length() {
+                        let pending = pending.cloned();
+                        let chunks = stream.chunks(bytes, move |watch| {
+                            if let (Some(timing), Some(started)) = (pending, started) {
+                                let _ = timing.set(HlsMediaResponseTiming {
+                                    request_ms: started.elapsed().as_millis(),
+                                    bytes,
+                                    streamed: true,
+                                    watch: Some(watch),
+                                });
+                            }
+                        });
+                        return Response::builder()
+                            .header(header::CONTENT_TYPE, "video/mp2t")
+                            .header(header::CONTENT_LENGTH, bytes)
+                            .header(header::CACHE_CONTROL, "public, max-age=3600")
+                            .header("X-Content-Type-Options", "nosniff")
+                            .body(StreamBody::new(chunks.map_ok(Frame::data)).boxed_unsync())
+                            .unwrap();
+                    }
+                    let Some((response, timing)) = stream.finish_buffered(&self.base).await else {
+                        return error(StatusCode::BAD_GATEWAY);
+                    };
+                    early_response = Some(response);
+                    watch = Some(timing);
+                }
+            }
+        }
+        let response = match early_response {
+            Some(response) => response,
+            None => {
+                fetch_hls_resource(url, watch_key, &self.base, watch.as_mut(), prefetched).await
+            }
+        };
+        if let (Some(timing), Some(started)) = (pending, started) {
+            if response.status().is_success() && is_hls_media(&response, url) {
+                let _ = timing.set(HlsMediaResponseTiming {
+                    request_ms: started.elapsed().as_millis(),
+                    bytes: response.body().len(),
+                    streamed: false,
+                    watch,
+                });
+            }
+        }
+        buffered(response, head)
+    }
+
     async fn handle(&self, request: Request<Incoming>) -> Result<Response<Body>, Infallible> {
         let head = request.method() == Method::HEAD;
         if request.method() != Method::GET && !head {
@@ -350,10 +643,12 @@ impl Gateway {
                         path.ends_with(".mp4") || path.ends_with(".m4s")
                     })
                 });
+                let full_get =
+                    !request.headers().contains_key(header::RANGE) || range == Some("bytes=0-");
                 if ranged_mp4.is_some() {
                     progressive(&url, ranged_mp4, head).await
                 } else {
-                    buffered(remote_playlist(&url, *watch_key, &self.base).await, head)
+                    self.hls_resource(&url, *watch_key, head, full_get).await
                 }
             }
             _ => error(StatusCode::NOT_FOUND),
@@ -362,13 +657,45 @@ impl Gateway {
     }
 }
 
+// Use an allowlist so child playlists, keys, and unidentified binary responses
+// do not get reported as media. MP4 initialization resources may qualify.
+fn is_hls_media(response: &Response<Vec<u8>>, url: &str) -> bool {
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if response.body().is_empty() || content_type.contains("mpegurl") {
+        return false;
+    }
+    if content_type.starts_with("video/") || content_type.starts_with("audio/") {
+        return true;
+    }
+    matches!(
+        content_type.split(';').next(),
+        Some("application/octet-stream" | "binary/octet-stream" | "")
+    ) && url::Url::parse(url).ok().is_some_and(|url| {
+        [".ts", ".m4s", ".mp4", ".aac"]
+            .iter()
+            .any(|ext| url.path().to_ascii_lowercase().ends_with(ext))
+    })
+}
+
 pub struct Prepared {
+    pub manifest_ms: Option<u128>,
+    pub(crate) media_timing: Option<HlsMediaTiming>,
+    pub(crate) prefetch_gateway: Option<Arc<Gateway>>,
     pub url: String,
     pub levels: Vec<Level>,
     pub task: AbortHandle,
 }
 
 pub async fn prepare(app: tauri::AppHandle, source: Source) -> Result<Prepared, String> {
+    let offline_lease = match &source {
+        Source::Offline { id, ep } => Some(app.state::<offline::Cache>().open_episode(*id, *ep)?.1),
+        _ => None,
+    };
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
         .await
         .map_err(|_| "本机媒体服务启动失败")?;
@@ -400,7 +727,8 @@ pub async fn prepare(app: tauri::AppHandle, source: Source) -> Result<Prepared, 
             }
         }
     };
-    let manifest = if let Media::Hls { root, watch_key } = &media {
+    let (manifest, manifest_ms) = if let Media::Hls { root, watch_key } = &media {
+        let started = Instant::now();
         let response = remote_playlist(root, *watch_key, &base).await;
         if !response.status().is_success() {
             return Err("无法读取视频播放列表".into());
@@ -409,9 +737,12 @@ pub async fn prepare(app: tauri::AppHandle, source: Source) -> Result<Prepared, 
         if !text.starts_with("#EXTM3U") {
             return Err("片源未提供可播放的 HLS 列表".into());
         }
-        Some(Manifest::new(text))
+        (
+            Some(Manifest::new(text)),
+            Some(started.elapsed().as_millis()),
+        )
     } else {
-        None
+        (None, None)
     };
     let levels = manifest
         .as_ref()
@@ -423,13 +754,18 @@ pub async fn prepare(app: tauri::AppHandle, source: Source) -> Result<Prepared, 
         })
         .unwrap_or_default();
     let url = format!("{base}/{entry}");
+    let media_timing = matches!(&media, Media::Hls { .. }).then(|| Arc::new(OnceLock::new()));
     let gateway = Arc::new(Gateway {
         app,
         capability,
         base,
         media,
         manifest,
+        _offline_lease: offline_lease,
+        media_timing: media_timing.clone(),
+        prefetched_segment: OnceLock::new(),
     });
+    let prefetch_gateway = media_timing.as_ref().map(|_| gateway.clone());
     let task = tokio::spawn(async move {
         let mut connections = JoinSet::new();
         loop {
@@ -451,5 +787,12 @@ pub async fn prepare(app: tauri::AppHandle, source: Source) -> Result<Prepared, 
         }
     })
     .abort_handle();
-    Ok(Prepared { url, levels, task })
+    Ok(Prepared {
+        url,
+        levels,
+        task,
+        manifest_ms,
+        media_timing,
+        prefetch_gateway,
+    })
 }

@@ -1,4 +1,9 @@
 //! Recently fetched HLS resources. Only media bytes go to temporary files.
+#[cfg(any(target_os = "ios", test))]
+mod streaming;
+#[cfg(target_os = "ios")]
+pub(crate) use streaming::open_streamed_ts;
+
 use crate::{media, net, network_policy};
 use once_cell::sync::Lazy;
 use serde::Serialize;
@@ -30,6 +35,7 @@ pub struct Source {
     pub origin: String,
     pub episodes: Vec<u32>,
     pub cover: Option<String>,
+    pub author: Option<crate::offline::Author>,
 }
 
 #[derive(Serialize)]
@@ -240,6 +246,7 @@ pub fn watch_begin(id: i64, ep: u32, url: String) -> Option<u64> {
                 origin: net::base(),
                 episodes: Vec::new(),
                 cover: None,
+                author: None,
             },
             strict: network_policy::strict_security(),
             needs_fill: false,
@@ -261,7 +268,13 @@ pub fn watch_begin(id: i64, ep: u32, url: String) -> Option<u64> {
 }
 
 #[tauri::command]
-pub fn watch_details(key: u64, title: String, mut episodes: Vec<u32>, cover: Option<String>) {
+pub fn watch_details(
+    key: u64,
+    title: String,
+    mut episodes: Vec<u32>,
+    cover: Option<String>,
+    author: Option<serde_json::Value>,
+) {
     let mut state = STATE.lock().unwrap();
     if let Some(session) = state.sessions.get_mut(&key) {
         if !title.trim().is_empty() {
@@ -272,6 +285,9 @@ pub fn watch_details(key: u64, title: String, mut episodes: Vec<u32>, cover: Opt
         episodes.dedup();
         session.source.episodes = episodes;
         session.source.cover = cover.filter(|url| url.len() <= 8192);
+        if let Some(author) = author.as_ref().and_then(crate::offline::author_from_value) {
+            session.source.author = Some(author);
+        }
     }
 }
 
@@ -348,6 +364,16 @@ pub fn recent() -> Vec<Recent> {
             needs_fill: item.needs_fill,
         })
         .collect()
+}
+
+#[cfg(target_os = "ios")]
+pub(crate) fn is_recorded(key: u64, url: &str) -> bool {
+    STATE
+        .lock()
+        .unwrap()
+        .sessions
+        .get(&key)
+        .is_some_and(|session| same_context(session) && session.resources.contains_key(url))
 }
 
 pub async fn read(key: u64, url: &str) -> Option<(Option<String>, Vec<u8>, url::Url)> {
@@ -522,10 +548,38 @@ fn record_response(
     })
 }
 
+#[derive(Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ServeTiming {
+    queue_ms: u128,
+    cache_lookup_ms: Option<u128>,
+    upstream_read_ms: Option<u128>,
+    network: Option<net::MediaFetchTiming>,
+    record_ms: Option<u128>,
+    cache_hit: Option<bool>,
+    prefetch_hit: bool,
+}
+
 pub async fn serve(path: &str, query: &str, origin: &str) -> Response<Vec<u8>> {
+    serve_with_timing(path, query, origin, None, None).await
+}
+
+pub(crate) type PrefetchedMedia = (Option<String>, Vec<u8>, url::Url);
+
+pub(crate) async fn serve_with_timing(
+    path: &str,
+    query: &str,
+    origin: &str,
+    mut timing: Option<&mut ServeTiming>,
+    prefetched: Option<PrefetchedMedia>,
+) -> Response<Vec<u8>> {
+    let queued_at = timing.as_ref().map(|_| Instant::now());
     let Ok(slot) = SERVE_SLOTS.clone().acquire_owned().await else {
         return media::respond(503, "text/plain", Vec::new(), "no-store");
     };
+    if let (Some(timing), Some(started)) = (timing.as_deref_mut(), queued_at) {
+        timing.queue_ms = started.elapsed().as_millis();
+    }
     let Some((key, kind)) = path
         .strip_prefix("/watch/")
         .and_then(|rest| rest.split_once('/'))
@@ -547,12 +601,42 @@ pub async fn serve(path: &str, query: &str, origin: &str) -> Response<Vec<u8>> {
         return media::respond(400, "text/plain", Vec::new(), "no-store");
     };
     let target = target.to_string();
-    let hit = read(source.key, &target).await;
-    let cached = hit.is_some();
-    let fetched = match hit {
-        Some((kind, bytes, url)) => Ok((kind, bytes, url, true)),
-        None => net::fetch_media_bounded(&target, &source.origin, MAX_RESOURCE).await,
+    let lookup_at = timing.as_ref().map(|_| Instant::now());
+    let prefetch_hit = prefetched.is_some();
+    let hit = if prefetch_hit {
+        None
+    } else {
+        read(source.key, &target).await
     };
+    let cached = hit.is_some();
+    if let (Some(timing), Some(started)) = (timing.as_deref_mut(), lookup_at) {
+        timing.prefetch_hit = prefetch_hit;
+        if !prefetch_hit {
+            timing.cache_hit = Some(cached);
+            timing.cache_lookup_ms = Some(started.elapsed().as_millis());
+        }
+    }
+    let upstream_at = timing
+        .as_ref()
+        .filter(|_| !cached && !prefetch_hit)
+        .map(|_| Instant::now());
+    let mut network = upstream_at.map(|_| net::MediaFetchTiming::default());
+    let fetched = match hit.or(prefetched) {
+        Some((kind, bytes, url)) => Ok((kind, bytes, url, true)),
+        None => {
+            net::fetch_media_bounded_with_timing(
+                &target,
+                &source.origin,
+                MAX_RESOURCE,
+                network.as_mut(),
+            )
+            .await
+        }
+    };
+    if let (Some(timing), Some(started)) = (timing.as_deref_mut(), upstream_at) {
+        timing.upstream_read_ms = Some(started.elapsed().as_millis());
+        timing.network = network;
+    }
     match fetched {
         Ok((kind, bytes, final_url, complete)) => {
             let (bytes, _slot) = if !cached && complete && bytes.len() <= MAX_RESOURCE {
@@ -561,11 +645,15 @@ pub async fn serve(path: &str, query: &str, origin: &str) -> Response<Vec<u8>> {
                 let final_url = final_url.clone();
                 // Move the body through recording and return it for the response;
                 // retaining a second full segment is unnecessary.
-                match record_response(bytes, slot, move |bytes| {
+                let record_at = timing.as_ref().map(|_| Instant::now());
+                let recorded = record_response(bytes, slot, move |bytes| {
                     record(source.key, target, content_type, final_url, bytes);
                 })
-                .await
-                {
+                .await;
+                if let (Some(timing), Some(started)) = (timing.as_deref_mut(), record_at) {
+                    timing.record_ms = Some(started.elapsed().as_millis());
+                }
+                match recorded {
                     Ok(bytes) => bytes,
                     Err(_) => {
                         return media::respond(
@@ -668,6 +756,7 @@ mod tests {
                     origin: net::base(),
                     episodes: vec![1],
                     cover: None,
+                    author: None,
                 },
                 strict: network_policy::strict_security(),
                 needs_fill: false,
@@ -691,6 +780,41 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(!files.dir.exists());
+    }
+
+    #[test]
+    fn capture_details_keep_only_valid_author_metadata_and_preserve_it_when_omitted() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        let files = files();
+        let (key, _) = session(files.clone());
+        let expected = serde_json::json!({"id":29,"name":"测试作者"});
+        watch_details(
+            key,
+            "Fixture".into(),
+            vec![2, 1],
+            None,
+            Some(
+                serde_json::json!({"id":29,"name":" 测试作者 ","avatar":"https://example.invalid/avatar"}),
+            ),
+        );
+        let author = source(key).unwrap().author.unwrap();
+        assert_eq!(serde_json::to_value(author).unwrap(), expected);
+        watch_details(key, "Fixture".into(), vec![1, 2], None, None);
+        watch_details(
+            key,
+            "Fixture".into(),
+            vec![1, 2],
+            None,
+            Some(serde_json::json!({"id":0,"name":"invalid"})),
+        );
+        let saved = source(key).unwrap();
+        assert_eq!(saved.episodes, [1, 2]);
+        assert_eq!(
+            serde_json::to_value(saved.author.unwrap()).unwrap(),
+            expected
+        );
+        discard(key);
+        wait_cleaned(key, &files);
     }
 
     #[test]

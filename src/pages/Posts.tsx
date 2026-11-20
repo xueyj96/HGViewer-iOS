@@ -3,7 +3,7 @@ import { appendUniqueById } from "../collections";
 import { api, cover, fmt, isIos, isMobile, LOCAL } from "../api";
 import type { Post } from "../types";
 import { useStore } from "../store";
-import { Img, LoadingStatus, PageStatus, PlaybackError } from "../components/ui";
+import { ErrorStatus, Img, LoadingStatus, PageStatus, PlaybackError } from "../components/ui";
 import { IOSBackButton, IOSPageBar } from "../components/IOSPageBar";
 import { browseCoverAttributes, useIOSBrowseCoverMenu } from "../components/IOSCoverMenu";
 import Player from "../components/Player";
@@ -97,9 +97,9 @@ export function PostsPage({ onBack, wide, active }: { onBack: () => void; wide: 
           </div>
         ) : loading || (page === 0 && !failed) ? (
           <div className="flex justify-center"><LoadingStatus variant="initial" label="正在加载图文" /></div>
-        ) : failed ? <PageStatus title="图文列表加载失败" onRetry={loadMore} />
+        ) : failed ? <ErrorStatus message="图文列表加载失败" active={active} onRetry={loadMore} />
           : <PageStatus title="暂无吃瓜内容" />}
-        {failed && items.length > 0 && !loading && <div className="mt-2"><PageStatus title="更多图文加载失败" onRetry={loadMore} /></div>}
+        {failed && items.length > 0 && !loading && <div className="mt-2"><ErrorStatus message="更多图文加载失败" active={active} onRetry={loadMore} /></div>}
         {!failed && page < pages && <div ref={sentinel} className="h-10" />}
         {loading && items.length > 0 && <div className="flex justify-center"><LoadingStatus variant="tail" label="正在加载更多图文" /></div>}
       </div>
@@ -401,7 +401,7 @@ export function PostDetail({ id: initialId, postIds, nextPostPage, onBack, activ
       <div ref={scrollRef} className="flex-1 scroll-y pb-8 hg-native-article-scroll">
         {err && (
           <div className="hg-ios-browse-content mb-2 px-4">
-            <PageStatus title="图文加载失败" detail={err} onRetry={retry} />
+            <ErrorStatus message={err && err !== "加载失败" ? `图文加载失败：${err}` : "图文加载失败"} active={active} onRetry={retry} />
           </div>
         )}
         {!post ? (!err && (

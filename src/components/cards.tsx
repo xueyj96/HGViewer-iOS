@@ -31,15 +31,16 @@ export function WaterfallCard({ v, onOpen }: { v: VideoCard; onOpen: () => void 
 }
 
 /* ——— 近无缝瀑布流 ——— */
-export function Masonry({ videos, onOpen, wide = false, gap = "gap-1" }: {
-  videos: VideoCard[]; onOpen: (v: VideoCard) => void; wide?: boolean; gap?: string;
+export function Masonry({ videos, onOpen, wide = false, gap = "gap-1", layout = "masonry" }: {
+  videos: VideoCard[]; onOpen: (v: VideoCard) => void; wide?: boolean; gap?: string; layout?: "masonry" | "grid";
 }) {
   const mb = gap === "gap-1" ? "mb-1" : "mb-1.5";
+  const grid = isIos || layout === "grid";
   return (
-    <div className={isIos ? `grid gap-2 ${wide ? "grid-cols-3" : "grid-cols-2"}`
+    <div className={grid ? `grid gap-2 ${wide ? "grid-cols-3" : "grid-cols-2"}`
       : `${wide ? "columns-3 xl:columns-4" : "columns-2"} ${gap} [column-fill:balance]`}>
       {videos.map((v) => (
-        <div key={v.id} className={isIos ? "min-w-0" : `break-inside-avoid ${mb}`}>
+        <div key={v.id} className={grid ? "min-w-0" : `break-inside-avoid ${mb}`}>
           <WaterfallCard v={v} onOpen={() => onOpen(v)} />
         </div>
       ))}

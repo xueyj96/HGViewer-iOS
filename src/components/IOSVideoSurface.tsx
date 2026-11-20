@@ -2,26 +2,28 @@ import { IOS_LAYOUT_CHANGE } from "../iosGeometry";
 import { invoke } from "@tauri-apps/api/core";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { logLine } from "../api";
+import { reportPlaybackStartup, type NativeOpen, type PlaybackStartupTiming, type Snapshot, type StartupSample } from "./iosPlaybackDiagnostics";
+export type { PlaybackStartupTiming } from "./iosPlaybackDiagnostics";
 import { formatQualityLevels, type PlaybackQuality } from "./PlaybackQuality";
 import type { VideoHandle, VideoSurfaceProps } from "./VideoSurface";
 
 type Action = "status" | "play" | "pause" | "seek" | "rate" | "volume" | "mute" | "close" | "quality" | "slide_out" | "slide_in" | "edge_pull" | "episode_pull";
-type Snapshot = {
-  time: number; duration: number; width: number; height: number; status: number; ready: number;
-  app_state: number; error_domain: number; error_code: number; underlying_domain: number; underlying_code: number;
-};
 type Failure = "open" | "start" | "status_or_seek" | "native_error" | "timeout" | "frame" | "loop_seek";
+const FOREGROUND_FRAME_GRACE_MS = 1000;
+const FOREGROUND_REOPEN_MS = 5000;
+const STARTUP_TIMEOUT_MS = 20000;
 const ERROR_DOMAINS = ["none", "AVFoundation", "URL", "CoreMedia", "POSIX", "other"];
 const APP_STATES = ["active", "inactive", "background"];
 export type NativeSource =
   | { kind: "offline"; id: number; ep: number; mp4: boolean }
   | { kind: "online"; url: string; watch_key?: number };
-export const preloadIOSPlayback = (source: NativeSource) =>
-  invoke("ios_player_preload", { source }).catch(() => {});
+export function preloadIOSPlayback(source: NativeSource, options?: { prefetchSegment: boolean; prepareStandby: boolean }) {
+  return invoke<void>("ios_player_preload", { source, ...options }).catch(() => {});
+}
 
-type NativeLevel = { index: number; height: number; bitrate: number };
 type Props = Pick<VideoSurfaceProps, "autoPlay" | "loop" | "muted" | "volume" | "rate" | "onTime" | "onDuration" | "onSize" | "onPlaying" | "onPause" | "onWaiting" | "onSeeked" | "onEnded" | "onQuality" | "onError" | "onClick"> & {
   source: NativeSource;
+  startupTiming?: PlaybackStartupTiming;
   inset?: boolean;
   viewport?: boolean;
   enterDirection?: number;
@@ -104,9 +106,13 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
     let reopenPending = false;
     let reopenReadyLogged = false;
     let foregroundAt: number | undefined;
+    let displayedFrame = false;
+    let visibilityRevision = 0;
+    let foregroundRecovery: { started: number; position: number; sought: boolean } | undefined;
     let lastPosition = 0;
     let restorePosition = 0;
     let levels: PlaybackQuality["levels"] = [];
+    let startupSample: StartupSample | undefined;
     wantsPlay.current = latest.current.autoPlay ?? true;
     setReady(false);
 
@@ -134,15 +140,25 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
       }, 250);
     };
     const visibilityChanged = () => {
+      visibilityRevision += 1;
       if (token) log(document.hidden ? "background" : "foreground", token);
-      if (document.hidden) return;
+      if (document.hidden) {
+        startupSample = undefined;
+        foregroundRecovery = undefined;
+        lastReadAt = 0;
+        stalledFor = 0;
+        return;
+      }
       foregroundAt = performance.now();
       startup = foregroundAt;
       scheduleReopen();
       const attempt = session.current;
-      if (attempt && wantsPlay.current) {
-        void control(attempt, "play").catch(() => fail(attempt, "start"));
-      }
+      if (!attempt) return;
+      if (displayedFrame) foregroundRecovery = { started: foregroundAt, position: lastPosition, sought: false };
+      // Reattach the existing frame geometry even if the viewport did not resize.
+      lastRect = "";
+      schedule();
+      if (wantsPlay.current) void control(attempt, "play").catch(() => fail(attempt, "start"));
     };
 
     const isCurrent = (attempt: number) => alive && token === attempt;
@@ -156,7 +172,7 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
       setReady(false);
       if (reopenAvailable) {
         reopenAvailable = false;
-        restorePosition = lastPosition;
+        restorePosition = !wantsPlay.current && foregroundRecovery ? foregroundRecovery.position : lastPosition;
         reopenPending = true;
         latest.current.onWaiting?.();
         scheduleReopen();
@@ -164,23 +180,37 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
         latest.current.onError?.("视频暂时无法播放，请稍后重试");
       }
     };
+    let statusEnabled = 0;
+    let readingAttempt = 0;
+    let pendingWake = 0;
+    let firstFrameWake = false;
     const read = async (attempt: number) => {
-      if (!isCurrent(attempt)) return;
+      if (!isCurrent(attempt) || readingAttempt === attempt) return;
+      readingAttempt = attempt;
+      const revision = visibilityRevision;
       try {
         const current = await control(attempt, "status");
         if (!isCurrent(attempt)) return;
-        const now = performance.now();
-        if (offline) {
-          const advancing = previous && current.status === 2 && Math.abs(current.time - previous.time) > 0.05;
-          if (!wantsPlay.current || current.status === 4 || advancing || document.hidden) {
-            stalledFor = 0;
-            recoveredStall = false;
-          } else if (lastReadAt) {
-            stalledFor += Math.min(now - lastReadAt, 400);
-          }
-          lastReadAt = now;
+        if (revision !== visibilityRevision) {
+          timer = window.setTimeout(() => void read(attempt), 200);
+          return;
         }
-        const timedOut = offline ? stalledFor >= 20000 : !document.hidden && !current.ready && wantsPlay.current && now - startup > 20000;
+        const now = performance.now();
+        const advancing = previous && Math.abs(current.time - previous.time) > 0.05;
+        const canStall = offline || (displayedFrame && current.ready && current.status === 3 && current.duration > 0);
+        if (!canStall || !wantsPlay.current || current.status === 4 || advancing || document.hidden) {
+          stalledFor = 0;
+          recoveredStall = false;
+        } else if (lastReadAt) {
+          stalledFor += Math.min(now - lastReadAt, 400);
+        }
+        lastReadAt = now;
+        const recovery = foregroundRecovery;
+        if (!document.hidden && current.ready) foregroundRecovery = undefined;
+        const frameMissing = !document.hidden && !current.ready && current.status !== 4;
+        const timedOut = stalledFor >= STARTUP_TIMEOUT_MS
+          || (frameMissing && (recovery ? now - recovery.started >= FOREGROUND_REOPEN_MS
+            : now - startup >= STARTUP_TIMEOUT_MS));
         if (current.status < 0 || timedOut) {
           fail(attempt, current.status < 0 ? "native_error" : "timeout", current);
           return;
@@ -192,6 +222,15 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
           if (isCurrent(attempt)) timer = window.setTimeout(() => void read(attempt), 200);
           return;
         }
+        if (frameMissing && recovery && !recovery.sought
+          && (current.status === 1 || current.status === 2) && current.duration > 0
+          && now - recovery.started >= FOREGROUND_FRAME_GRACE_MS) {
+          recovery.sought = true;
+          log("foreground_frame_seek", attempt, current);
+          await control(attempt, "seek", wantsPlay.current ? current.time : recovery.position, wantsPlay.current);
+          if (isCurrent(attempt)) timer = window.setTimeout(() => void read(attempt), 200);
+          return;
+        }
         if (offline && !recoveredStall && stalledFor >= 3000 && (current.ready || current.duration > 0)) {
           // Restart decoding at the current position once, like a scrub that resumes playback.
           recoveredStall = true;
@@ -200,6 +239,7 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
         }
         const callbacks = latest.current;
         if (current.ready && !previous?.ready) {
+          displayedFrame = true;
           if (enterDirection !== undefined) {
             const direction = enterDirection;
             enterDirection = undefined;
@@ -208,6 +248,11 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
             callbacks.onEnter?.();
           }
           setReady(true);
+          if (startupSample && !document.hidden) {
+            reportPlaybackStartup(attempt, source.kind, current, startupSample, latest.current.startupTiming,
+              !reopenAvailable, firstFrameWake);
+          }
+          startupSample = undefined;
           if (!reopenAvailable && !reopenReadyLogged) {
             reopenReadyLogged = true;
             log("retry_ready", attempt, current);
@@ -223,7 +268,8 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
           }
         }
         // Duration can trigger a resume seek; this snapshot still holds the pre-seek time.
-        if (!restorePosition && seekRevision.current === snapshotSeekRevision && current.time !== previous?.time) {
+        if (!restorePosition && !(frameMissing && recovery && !wantsPlay.current)
+          && seekRevision.current === snapshotSeekRevision && current.time !== previous?.time) {
           lastPosition = current.time;
           callbacks.onTime?.(current.time);
         }
@@ -247,6 +293,29 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
         previous = current;
         timer = window.setTimeout(() => void read(attempt), 200);
       } catch { fail(attempt, "status_or_seek"); }
+      finally {
+        if (readingAttempt === attempt) readingAttempt = 0;
+        if (pendingWake === attempt) {
+          pendingWake = 0;
+          if (isCurrent(attempt) && !displayedFrame) {
+            window.clearTimeout(timer);
+            void read(attempt);
+          }
+        }
+      }
+    };
+
+    const nativeFirstFrame = (event: Event) => {
+      const attempt = (event as CustomEvent<unknown>).detail;
+      if (typeof attempt !== "number" || attempt !== statusEnabled || !isCurrent(attempt) ||
+          displayedFrame || document.hidden) return;
+      firstFrameWake = true;
+      if (readingAttempt === attempt) {
+        pendingWake = attempt;
+      } else {
+        window.clearTimeout(timer);
+        void read(attempt);
+      }
     };
 
     function open() {
@@ -254,18 +323,28 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
       const attempt = ++nextToken;
       token = attempt;
       previous = undefined;
+      displayedFrame = false;
+      firstFrameWake = false;
+      foregroundRecovery = undefined;
       lastReadAt = 0;
       stalledFor = 0;
       recoveredStall = false;
       lastRect = "";
       previousViewport = undefined;
+      startupSample = undefined;
+      const openingRevision = visibilityRevision;
       let stage: Failure = "open";
-      void invoke<NativeLevel[]>("ios_player_open", { source: JSON.parse(sourceKey), token: attempt }).then(async (choices) => {
+      void (async () => {
+        const requestedAt = performance.now();
+        const native = await invoke<NativeOpen>("ios_player_open", { source, token: attempt });
         if (!isCurrent(attempt)) return;
         stage = "start";
         session.current = attempt;
         startup = performance.now();
-        levels = formatQualityLevels(choices);
+        if (!document.hidden && openingRevision === visibilityRevision) {
+          startupSample = { requestedAt, nativeOpenedAt: startup, native };
+        }
+        levels = formatQualityLevels(native.levels);
         if (levels.length) latest.current.onQuality?.({ levels, current: -1 });
         updateFrame();
         await control(attempt, "rate", latest.current.rate ?? 1);
@@ -273,8 +352,12 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
         await control(attempt, "mute", Number(!!latest.current.muted));
         if (!isCurrent(attempt)) return;
         await control(attempt, wantsPlay.current ? "play" : "pause");
-        if (isCurrent(attempt)) void read(attempt);
-      }).catch(() => fail(attempt, stage));
+        if (isCurrent(attempt)) {
+          if (startupSample) startupSample.readyToPollAt = performance.now();
+          statusEnabled = attempt;
+          void read(attempt);
+        }
+      })().catch(() => fail(attempt, stage));
     }
 
     const marker = surface.current;
@@ -302,6 +385,7 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
     const schedule = () => { if (!frame) frame = requestAnimationFrame(updateFrame); };
     const observer = new ResizeObserver(schedule);
     if (marker) observer.observe(marker);
+    window.addEventListener("hg-ios-first-frame", nativeFirstFrame);
     window.addEventListener("resize", schedule);
     window.addEventListener(IOS_LAYOUT_CHANGE, schedule);
     window.visualViewport?.addEventListener("resize", schedule);
@@ -314,6 +398,7 @@ export default forwardRef<VideoHandle, Props>(function IOSVideoSurface(props, re
 
     return () => {
       observer.disconnect();
+      window.removeEventListener("hg-ios-first-frame", nativeFirstFrame);
       window.removeEventListener("resize", schedule);
       window.removeEventListener(IOS_LAYOUT_CHANGE, schedule);
       window.visualViewport?.removeEventListener("resize", schedule);

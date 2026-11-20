@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tauri::http::{header, Response};
@@ -16,6 +16,21 @@ use tokio::{
 
 #[path = "offline_diagnostics.rs"]
 mod diagnostics;
+#[path = "offline_files.rs"]
+mod files;
+#[cfg(target_os = "ios")]
+#[path = "offline_finalize.rs"]
+mod finalize;
+#[cfg(all(target_os = "ios", feature = "storage-integration"))]
+#[path = "offline_integration.rs"]
+mod integration;
+#[cfg(all(target_os = "ios", feature = "storage-integration"))]
+pub use integration::run as run_storage_integration;
+#[cfg(target_os = "ios")]
+#[path = "offline_remux.rs"]
+mod remux;
+#[cfg(target_os = "ios")]
+pub(crate) use files::ReadLease;
 
 #[path = "offline_queue.rs"]
 mod queue;
@@ -38,14 +53,60 @@ pub struct Episode {
     ep: u32,
     title: String,
     bytes: u64,
-    mp4: bool,
+    pub(crate) mp4: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    media_file: Option<String>,
+}
+
+/// Local display metadata only; never persist remote avatar or profile URLs.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Author {
+    id: i64,
+    name: String,
+}
+
+impl Author {
+    fn normalized(id: i64, name: &str) -> Option<Self> {
+        let name = name.trim();
+        (id > 0
+            && id <= 9_007_199_254_740_991 // Preserve exact identity across the JavaScript IPC boundary.
+            && !name.is_empty()
+            && name.chars().count() <= 160
+            && !name.chars().any(char::is_control))
+        .then(|| Self {
+            id,
+            name: name.to_owned(),
+        })
+    }
+
+    fn validated(self) -> Option<Self> {
+        Self::normalized(self.id, &self.name)
+    }
+}
+
+pub(crate) fn author_from_value(value: &serde_json::Value) -> Option<Author> {
+    Author::normalized(value.get("id")?.as_i64()?, value.get("name")?.as_str()?)
+}
+
+fn deserialize_author<'de, D>(deserializer: D) -> Result<Option<Author>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(author_from_value(&value))
 }
 
 #[derive(Serialize, Deserialize)]
-struct Show {
+pub struct Show {
     episodes: Vec<u32>,
     #[serde(default)]
     cover: bool,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_author",
+        skip_serializing_if = "Option::is_none"
+    )]
+    author: Option<Author>,
 }
 
 fn show_dir(root: &Path, id: i64) -> PathBuf {
@@ -74,12 +135,45 @@ fn episode_numbers(detail: &serde_json::Value) -> Vec<u32> {
     episodes
 }
 
+enum ShowEpisodes {
+    // Download/refresh details are authoritative; do not union them with old data.
+    Replace(Vec<u32>),
+    // An author-only capture must resolve this against the latest metadata under lock.
+    PreserveOrCurrent(u32),
+}
+
+impl From<Vec<u32>> for ShowEpisodes {
+    fn from(episodes: Vec<u32>) -> Self {
+        Self::Replace(episodes)
+    }
+}
+
+// Only writers take this low-frequency metadata lock. Callers may already own
+// the queue lock; never acquire queue state while holding this guard.
+static SHOW_METADATA_WRITES: Mutex<()> = Mutex::new(());
+
 fn save_show(
     root: &Path,
     id: i64,
-    episodes: Vec<u32>,
+    episodes: impl Into<ShowEpisodes>,
     cover: Option<&[u8]>,
+    author: Option<Author>,
 ) -> std::io::Result<()> {
+    let _write = SHOW_METADATA_WRITES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let previous = read_show(root, id);
+    let episodes = match episodes.into() {
+        ShowEpisodes::Replace(episodes) => episodes,
+        ShowEpisodes::PreserveOrCurrent(ep) => previous
+            .as_ref()
+            .map(|show| show.episodes.clone())
+            .filter(|episodes| !episodes.is_empty())
+            .unwrap_or_else(|| vec![ep]),
+    };
+    let author = author
+        .and_then(Author::validated)
+        .or_else(|| previous.and_then(|show| show.author));
     let dir = show_dir(root, id);
     std::fs::create_dir_all(&dir)?;
     if let Some(cover) = cover {
@@ -94,6 +188,7 @@ fn save_show(
     let show = Show {
         episodes,
         cover: dir.join("cover").is_file(),
+        author,
     };
     let temp = dir.join("info.tmp");
     std::fs::write(&temp, serde_json::to_vec(&show)?)?;
@@ -113,17 +208,40 @@ async fn load_show_cover(detail: &serde_json::Value) -> Option<std::sync::Arc<Ve
 pub struct Cache {
     root: Mutex<Option<PathBuf>>,
     queue: Mutex<Queue>,
+    access: Arc<Mutex<files::Access>>,
 }
 
 impl Cache {
     #[cfg(target_os = "ios")]
     pub fn mp4_path(&self, id: i64, ep: u32) -> Result<PathBuf, String> {
-        let file = path(&self.root()?, id, ep).join("video.mp4");
-        if id > 0 && ep > 0 && file.is_file() {
+        let root = self.root()?;
+        let directory = path(&root, id, ep);
+        let item = read_episode(&root, &directory).ok_or("找不到本地视频")?;
+        let file = item.media_path(&directory).ok_or("本地视频文件名无效")?;
+        if id > 0 && ep > 0 && item.mp4 && file.is_file() {
             Ok(file)
         } else {
             Err("找不到本地视频".into())
         }
+    }
+
+    #[cfg(all(target_os = "ios", any(test, feature = "storage-integration")))]
+    pub(crate) fn test_reader_count(&self, id: i64, ep: u32) -> usize {
+        self.access
+            .lock()
+            .unwrap()
+            .readers
+            .get(&(id, ep))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    #[cfg(target_os = "ios")]
+    pub fn open_episode(&self, id: i64, ep: u32) -> Result<(Episode, ReadLease), String> {
+        let lease = files::ReadLease::new(&self.access, id, ep);
+        let root = self.root()?;
+        let item = read_episode(&root, &path(&root, id, ep)).ok_or("找不到本地视频")?;
+        Ok((item, lease))
     }
 
     pub fn bind(&self, root: PathBuf) {
@@ -132,8 +250,8 @@ impl Cache {
         }
         let _ = std::fs::remove_dir_all(root.join(".partial"));
         cleanup_detached(&root, root.join(".trash"));
-        let pending = Pending::read(&root);
-        prune_staging(&root, &pending);
+        let mut pending = Pending::read(&root);
+        prune_staging(&root, &mut pending);
         self.queue.lock().unwrap().pending = pending;
         *self.root.lock().unwrap() = Some(root);
     }
@@ -189,8 +307,8 @@ fn path(root: &Path, id: i64, ep: u32) -> PathBuf {
 fn read_episode(root: &Path, directory: &Path) -> Option<Episode> {
     let raw = std::fs::read(directory.join("info.json")).ok()?;
     let item: Episode = serde_json::from_slice(&raw).ok()?;
-    let media = if item.mp4 { "video.mp4" } else { "index.m3u8" };
-    (directory == path(root, item.id, item.ep) && directory.join(media).is_file()).then_some(item)
+    (directory == path(root, item.id, item.ep) && item.media_path(directory)?.is_file())
+        .then_some(item)
 }
 
 fn list(root: &Path) -> Result<Vec<Episode>, String> {
@@ -203,17 +321,60 @@ fn list(root: &Path) -> Result<Vec<Episode>, String> {
     Ok(items)
 }
 
+/// Local reads arrive through the native IPC callback. Keep filesystem work on
+/// the blocking pool rather than the UI callback or Tokio's async worker threads.
+async fn blocking_read<T, F>(read: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(read)
+        .await
+        .map_err(|_| "本地缓存读取失败".into())
+}
+
+/// Read local show metadata without fetching an online video detail.
 #[tauri::command]
-pub fn offline_episode(cache: tauri::State<'_, Cache>, id: i64, ep: u32) -> Option<Episode> {
-    if id <= 0 || ep == 0 {
+pub async fn offline_show(app: tauri::AppHandle, id: i64) -> Option<Show> {
+    if id <= 0 {
         return None;
     }
-    let root = cache.root().ok()?;
-    read_episode(&root, &path(&root, id, ep))
+    blocking_read(move || {
+        use tauri::Manager;
+        let cache = app.state::<Cache>();
+        read_show(&cache.root().ok()?, id)
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 #[tauri::command]
-pub fn offline_status(cache: tauri::State<'_, Cache>) -> Result<serde_json::Value, String> {
+pub async fn offline_episode(app: tauri::AppHandle, id: i64, ep: u32) -> Option<Episode> {
+    if id <= 0 || ep == 0 {
+        return None;
+    }
+    blocking_read(move || {
+        use tauri::Manager;
+        let cache = app.state::<Cache>();
+        let root = cache.root().ok()?;
+        read_episode(&root, &path(&root, id, ep))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+#[tauri::command]
+pub async fn offline_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    blocking_read(move || {
+        use tauri::Manager;
+        status_snapshot(&app.state::<Cache>())
+    })
+    .await?
+}
+
+fn status_snapshot(cache: &Cache) -> Result<serde_json::Value, String> {
     let root = cache.root()?;
     let items = list(&root)?;
     let bytes = items.iter().map(|item| item.bytes).sum::<u64>();
@@ -237,7 +398,7 @@ pub fn offline_status(cache: tauri::State<'_, Cache>) -> Result<serde_json::Valu
         (queue.jobs(), queue.last.clone())
     };
     #[cfg(target_os = "ios")]
-    let background = if background_allowed(&cache) {
+    let background = if background_allowed(cache) {
         crate::ios_download_background::status()
     } else {
         "disabled"
@@ -347,6 +508,7 @@ pub fn resume_foreground(app: &tauri::AppHandle) {
     let cache = app.state::<Cache>();
     let Ok(root) = cache.root() else { return };
     let resumed = cache.queue.lock().unwrap().resume_foreground(&root);
+    finalize::start(app);
     match resumed {
         Ok(resumed) => {
             if resumed {
@@ -393,6 +555,7 @@ pub fn offline_stop(cache: tauri::State<'_, Cache>, id: i64) -> Result<(), Strin
         let mut job = job.lock().unwrap();
         if job.watch_key.is_some() {
             job.stopping = true;
+            job.ready_interrupted = false;
             job.resume_capture_after_stop = false;
         }
     } else {
@@ -437,7 +600,9 @@ pub fn offline_pause(cache: tauri::State<'_, Cache>, id: i64) -> Result<(), Stri
         Ok(())
     })?;
     if let Some(job) = queue.active.get(&id) {
-        job.lock().unwrap().stopping = true;
+        let mut job = job.lock().unwrap();
+        job.stopping = true;
+        job.ready_interrupted = false;
     }
     if queued {
         queue.interrupted += 1;
@@ -453,6 +618,10 @@ pub fn offline_pause(cache: tauri::State<'_, Cache>, id: i64) -> Result<(), Stri
 
 #[tauri::command]
 pub fn offline_cancel(cache: tauri::State<'_, Cache>, id: i64) -> Result<(), String> {
+    cancel_download(&cache, id)
+}
+
+fn cancel_download(cache: &Cache, id: i64) -> Result<(), String> {
     let root = cache.root()?;
     let mut queue = cache.queue.lock().unwrap();
     let canceled = queue
@@ -460,16 +629,31 @@ pub fn offline_cancel(cache: tauri::State<'_, Cache>, id: i64) -> Result<(), Str
         .entries
         .iter()
         .any(|entry| entry.id == id && entry.capture.is_none() && !entry.paused);
-    queue.change(&root, |pending| {
+    // Remove the recovery intent before acknowledging cancellation. The active worker cannot
+    // recreate it: prepare_ready uses this same queue lock and checks the stopped/missing intent.
+    let stage = stage_path(&root, id);
+    let ready = files::read_ready(&stage, id, None);
+    if ready.is_some() {
+        std::fs::remove_file(stage.join(".single-file-ready.json"))
+            .map_err(|_| "无法取消本地合成，请重试")?;
+    }
+    let changed = queue.change(&root, |pending| {
         pending
             .entries
             .retain(|entry| entry.id != id || entry.capture.is_some());
         Ok(())
-    })?;
+    });
+    if let Err(error) = changed {
+        if let Some(ready) = ready {
+            let _ = files::persist_ready(&stage, &ready);
+        }
+        return Err(error);
+    }
     if let Some(job) = queue.active.get(&id) {
         let mut job = job.lock().unwrap();
         if job.watch_key.is_none() {
             job.stopping = true;
+            job.ready_interrupted = false;
         }
     }
     let detached = if !queue.active.contains_key(&id)
@@ -514,6 +698,21 @@ fn delete_cached(cache: &Cache, id: i64, ep: Option<u32>) -> Result<(), String> 
     // release, and therefore cannot erase a new worker's directory for this id.
     let result: Result<(), String> = (|| {
         let mut queue = cache.queue.lock().unwrap();
+        let access = cache.access.lock().unwrap();
+        if access
+            .converting
+            .iter()
+            .any(|&(show, number)| show == id && ep.is_none_or(|ep| ep == number))
+        {
+            return Err("正在整理这集缓存，请稍后再试".into());
+        }
+        if access
+            .readers
+            .keys()
+            .any(|&(show, number)| show == id && ep.is_none_or(|ep| ep == number))
+        {
+            return Err("这集正在播放或预加载，请先退出播放".into());
+        }
         if queue.active.contains_key(&id)
             || queue
                 .pending
@@ -615,7 +814,14 @@ pub async fn offline_refresh_show(
     if !list(&root)?.iter().any(|item| item.id == id) {
         return Err("这部剧的本地缓存已删除".into());
     }
-    save_show(&root, id, episodes, cover.as_deref().map(Vec::as_slice)).map_err(storage_error)
+    save_show(
+        &root,
+        id,
+        episodes,
+        cover.as_deref().map(Vec::as_slice),
+        detail.get("author").and_then(author_from_value),
+    )
+    .map_err(storage_error)
 }
 
 #[tauri::command]
@@ -798,7 +1004,9 @@ pub fn fill_slots(app: &tauri::AppHandle) {
             let attempt = || async {
                 let result = download_entry(&app, &cache, &job, &root, &entry).await;
                 let stage = stage_path(&root, entry.id);
-                if entry.capture.is_some() || !has_staging_checkpoint(&stage) {
+                if (entry.capture.is_some() && files::read_ready(&stage, entry.id, None).is_none())
+                    || !has_staging_checkpoint(&stage)
+                {
                     if let Err(error) = fs::remove_dir_all(&stage).await {
                         if error.kind() != std::io::ErrorKind::NotFound {
                             let progress = job.lock().unwrap().clone();
@@ -959,6 +1167,39 @@ async fn download_entry(
     entry: &Entry,
 ) -> Result<(), TransferFailure> {
     use tauri::Manager;
+    #[cfg(target_os = "ios")]
+    if let Some(ready) = files::read_ready(&stage_path(root, entry.id), entry.id, None) {
+        if entry
+            .episodes
+            .as_ref()
+            .is_none_or(|selected| selected.contains(&ready.ep))
+        {
+            {
+                let mut progress = job.lock().unwrap();
+                progress.ep = ready.ep;
+                progress.title = ready.title.clone();
+            }
+            commit_ready(job, root, &stage_path(root, entry.id), &ready).await?;
+            // No playlist/API fetch is needed if the persisted selection is already complete.
+            let selected = entry
+                .episodes
+                .clone()
+                .map(|eps| eps.into_iter().collect::<Vec<_>>())
+                .or_else(|| read_show(root, entry.id).map(|show| show.episodes));
+            if selected.as_ref().is_some_and(|eps| {
+                !eps.is_empty()
+                    && eps
+                        .iter()
+                        .all(|&ep| read_episode(root, &path(root, entry.id, ep)).is_some())
+            }) {
+                let count = selected.unwrap().len();
+                let mut progress = job.lock().unwrap();
+                progress.total = count;
+                progress.done = count;
+                return Ok(());
+            }
+        }
+    }
     if let Some(capture) = entry.capture {
         let source = watch::source(capture.key).ok_or_else(|| {
             TransferFailure::from("这集的临时缓存已清理，请从选集重新缓存")
@@ -973,6 +1214,7 @@ async fn download_entry(
         }
         let segments = cache.queue.lock().unwrap().pending.segments;
         commit_episode(
+            Some(cache),
             job,
             root,
             source.id,
@@ -987,14 +1229,20 @@ async fn download_entry(
             },
         )
         .await?;
-        if !source.episodes.is_empty() {
+        if !source.episodes.is_empty() || source.author.is_some() {
+            let episodes = if source.episodes.is_empty() {
+                ShowEpisodes::PreserveOrCurrent(source.ep)
+            } else {
+                ShowEpisodes::Replace(source.episodes)
+            };
             let cover = source.cover.as_deref().and_then(media::cached_cover);
             // This active worker owns the show's files until Queue::finish.
             let _ = save_show(
                 root,
                 source.id,
-                source.episodes,
+                episodes,
                 cover.as_deref().map(Vec::as_slice),
+                source.author,
             );
         }
         watch::discard(capture.key);
@@ -1074,10 +1322,12 @@ fn discard_staging(root: &Path, id: i64) -> Option<PathBuf> {
 }
 
 fn has_staging_checkpoint(stage: &Path) -> bool {
-    stage.join(HLS_CHECKPOINT).is_file() || stage.join(HLS_ASSETS).is_dir()
+    stage.join(HLS_CHECKPOINT).is_file()
+        || stage.join(HLS_ASSETS).is_dir()
+        || stage.join(".single-file-ready.json").is_file()
 }
 
-fn prune_staging(root: &Path, pending: &Pending) {
+fn prune_staging(root: &Path, pending: &mut Pending) {
     let Ok(stages) = std::fs::read_dir(root.join(".partials")) else {
         return;
     };
@@ -1087,19 +1337,43 @@ fn prune_staging(root: &Path, pending: &Pending) {
             .file_name()
             .to_str()
             .and_then(|name| name.parse::<i64>().ok());
-        let queued = id.is_some_and(|id| pending.entries.iter().any(|entry| entry.id == id));
+        let ready = files::read_ready(&staging, id.unwrap_or_default(), None);
+        let episode = staged_episode(&staging).or_else(|| ready.as_ref().map(|r| r.ep));
+        let mut queued = id.is_some_and(|id| pending.entries.iter().any(|entry| entry.id == id));
         let committed = id
-            .zip(staged_episode(&staging))
+            .zip(episode)
             .is_some_and(|(id, ep)| path(root, id, ep).join("info.json").is_file());
+        // A capture completed just before a crash/persist failure is a durable local intent too.
+        if !queued && !committed {
+            if let Some(ready) = &ready {
+                pending.entries.push(Entry::new(
+                    ready.id,
+                    ready.title.clone(),
+                    Some(BTreeSet::from([ready.ep])),
+                    None,
+                ));
+                queued = true;
+                if pending.persist(root).is_err() {
+                    diagnostics::record(
+                        root,
+                        "queue_persist_failed",
+                        serde_json::json!({"operation":"restore_ready"}),
+                    );
+                }
+            }
+        }
         if !queued || committed || !has_staging_checkpoint(&staging) {
             let _ = std::fs::remove_dir_all(&staging);
-        } else {
+        } else if files::read_ready(&staging, id.unwrap_or_default(), staged_episode(&staging))
+            .is_none()
+        {
             let _ = std::fs::remove_dir_all(staging.join(HLS_PACKAGE));
         }
     }
 }
 
 async fn commit_episode(
+    _cache: Option<&Cache>,
     job: &Mutex<Job>,
     root: &Path,
     id: i64,
@@ -1114,6 +1388,10 @@ async fn commit_episode(
         return Ok(());
     }
     let stage = stage_path(root, id);
+    #[cfg(target_os = "ios")]
+    if let Some(ready) = files::read_ready(&stage, id, Some(ep)) {
+        return commit_ready(job, root, &stage, &ready).await;
+    }
     let options = TransferOptions {
         resume_episode: options.capture.is_none().then_some(ep),
         ..options
@@ -1141,39 +1419,152 @@ async fn commit_episode(
             .map_err(TransferFailure::storage)?;
     }
     let (bytes, mp4) = save_video(job, &stage, url, origin, options).await?;
+    #[cfg(not(target_os = "ios"))]
     check_job(job)?;
+    #[cfg(not(target_os = "ios"))]
     let package = if options.resume_episode.is_some() {
         stage.join(HLS_PACKAGE)
     } else {
         stage.clone()
     };
-    let info = Episode {
-        id,
-        ep,
-        title: title.to_owned(),
-        bytes,
-        mp4,
-    };
-    let json = serde_json::to_vec(&info)
-        .map_err(|_| TransferFailure::from("无法保存缓存信息").at("storage"))?;
-    fs::write(package.join("info.json"), json)
-        .await
-        .map_err(TransferFailure::storage)?;
-    fs::rename(&package, &dest).await.map_err(|error| {
-        let mut failure = TransferFailure::storage(error);
-        failure.message = "无法完成缓存".into();
-        failure
-    })?;
-    if options.resume_episode.is_some() {
-        if fs::remove_dir_all(&stage).await.is_err() {
-            diagnostics::record(
-                root,
-                "staging_cleanup_failed",
-                serde_json::json!({"operation": "commit"}),
-            );
+    #[cfg(target_os = "ios")]
+    {
+        // Capture downloads used a flat stage. Normalize only the completed package, retaining all source data.
+        if options.resume_episode.is_none() {
+            let normalized = stage.join(HLS_PACKAGE);
+            fs::create_dir_all(&normalized)
+                .await
+                .map_err(TransferFailure::storage)?;
+            let mut entries = fs::read_dir(&stage)
+                .await
+                .map_err(TransferFailure::storage)?;
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .map_err(TransferFailure::storage)?
+            {
+                if entry.file_name() != HLS_PACKAGE {
+                    fs::rename(entry.path(), normalized.join(entry.file_name()))
+                        .await
+                        .map_err(TransferFailure::storage)?;
+                }
+            }
         }
+        let ready = files::Ready {
+            id,
+            ep,
+            title: title.to_owned(),
+            bytes,
+            mp4,
+            filename: files::filename(title, ep, files::timestamp(&stage.join(HLS_PACKAGE))),
+            watch_key: options.capture.map(|capture| capture.key),
+        };
+        prepare_ready(_cache, job, root, &stage, &ready)?;
+        return commit_ready(job, root, &stage, &ready).await;
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let info = Episode {
+            id,
+            ep,
+            title: title.to_owned(),
+            bytes,
+            mp4,
+            media_file: None,
+        };
+        let json = serde_json::to_vec(&info)
+            .map_err(|_| TransferFailure::from("无法保存缓存信息").at("storage"))?;
+        fs::write(package.join("info.json"), json)
+            .await
+            .map_err(TransferFailure::storage)?;
+        fs::rename(&package, &dest).await.map_err(|error| {
+            let mut failure = TransferFailure::storage(error);
+            failure.message = "无法完成缓存".into();
+            failure
+        })?;
+        if options.resume_episode.is_some() {
+            if fs::remove_dir_all(&stage).await.is_err() {
+                diagnostics::record(
+                    root,
+                    "staging_cleanup_failed",
+                    serde_json::json!({"operation": "commit"}),
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(any(target_os = "ios", test))]
+fn prepare_ready(
+    cache: Option<&Cache>,
+    job: &Mutex<Job>,
+    root: &Path,
+    stage: &Path,
+    ready: &files::Ready,
+) -> Result<(), TransferFailure> {
+    if let Some(cache) = cache {
+        let mut queue = cache.queue.lock().unwrap();
+        let stopped = {
+            let job = job.lock().unwrap();
+            job.stopping && !job.ready_interrupted
+        };
+        if stopped
+            && !queue
+                .pending
+                .entries
+                .iter()
+                .any(|entry| entry.id == ready.id)
+        {
+            return Err("下载已停止".into());
+        }
+        files::persist_ready(stage, ready).map_err(TransferFailure::storage)?;
+        queue
+            .promote_ready(root, ready.id, ready.ep)
+            .map_err(TransferFailure::storage)?;
+    } else {
+        files::persist_ready(stage, ready).map_err(TransferFailure::storage)?;
     }
     Ok(())
+}
+
+#[cfg(target_os = "ios")]
+async fn commit_ready(
+    job: &Mutex<Job>,
+    root: &Path,
+    stage: &Path,
+    ready: &files::Ready,
+) -> Result<(), TransferFailure> {
+    let dest = path(root, ready.id, ready.ep);
+    if dest.exists() {
+        return Ok(());
+    }
+    let episode = finalize::package(job, stage, ready).await?;
+    check_job(job)?;
+    fs::rename(stage.join(HLS_PACKAGE), &dest)
+        .await
+        .map_err(TransferFailure::storage)?;
+    diagnostics::record(
+        root,
+        "single_file_committed",
+        serde_json::json!({"id":ready.id,"ep":ready.ep,"bytes":episode.bytes}),
+    );
+    if let Some(key) = ready.watch_key {
+        watch::discard(key);
+    }
+    if files::cleanup_legacy(&dest, &episode).is_err() || fs::remove_dir_all(stage).await.is_err() {
+        diagnostics::record(
+            root,
+            "single_file_cleanup_pending",
+            serde_json::json!({"id":ready.id,"ep":ready.ep}),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "ios")]
+pub fn migrate_existing(app: &tauri::AppHandle) {
+    finalize::start(app);
 }
 
 async fn run(
@@ -1217,6 +1608,15 @@ async fn run(
         .copied()
         .filter(|&ep| !path(root, id, ep).exists())
         .collect();
+    // Preserve the selection scope before transfer, so a ready-only retry never needs the API.
+    save_show(
+        root,
+        id,
+        all_episodes.clone(),
+        None,
+        detail.get("author").and_then(author_from_value),
+    )
+    .map_err(TransferFailure::storage)?;
     {
         let mut job = job.lock().unwrap();
         job.total = episodes.len();
@@ -1256,7 +1656,7 @@ async fn run(
             segments,
             ..TransferOptions::default()
         };
-        commit_episode(job, root, id, ep, &title, url, origin, options)
+        commit_episode(Some(cache), job, root, id, ep, &title, url, origin, options)
             .await
             .map_err(|error| error.with_context(&format!("第 {ep} 集：")))?;
         if !stored_show {
@@ -1272,6 +1672,7 @@ async fn run(
                 id,
                 all_episodes.clone(),
                 cover.as_deref().map(Vec::as_slice),
+                None,
             );
             stored_show = true;
         }
@@ -1326,7 +1727,23 @@ pub async fn serve(cache: &Cache, path_value: &str, range: Option<&str>) -> Resp
             _ => return error(404),
         },
     };
-    let Ok(mut file) = fs::File::open(path(&root, id, ep).join(name)).await else {
+    let directory = path(&root, id, ep);
+    let media_path = if *name == "video.mp4" {
+        let declared = read_episode(&root, &directory)
+            .filter(|item| item.mp4)
+            .and_then(|item| item.media_path(&directory));
+        if directory.join("info.json").exists() {
+            declared
+        } else {
+            Some(directory.join("video.mp4"))
+        }
+    } else {
+        Some(directory.join(name))
+    };
+    let Some(media_path) = media_path else {
+        return error(404);
+    };
+    let Ok(mut file) = fs::File::open(media_path).await else {
         return error(404);
     };
     let Ok(meta) = file.metadata().await else {
@@ -1403,6 +1820,18 @@ mod tests {
     use aes::cipher::{BlockEncrypt, KeyInit};
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::{io::AsyncWriteExt, net::TcpListener};
+
+    #[tokio::test]
+    async fn local_status_read_runs_off_caller_thread_and_preserves_errors() {
+        let caller = std::thread::current().id();
+        let result = blocking_read(move || {
+            assert_ne!(std::thread::current().id(), caller);
+            status_snapshot(&Cache::default())
+        })
+        .await
+        .expect("blocking read joined");
+        assert_eq!(result.unwrap_err(), "本地缓存目录不可用");
+    }
 
     #[tokio::test]
     async fn retries_transient_download_failure_only_once() {
@@ -1562,6 +1991,7 @@ mod tests {
             let local = Some(Capture { key, fill: false });
             let source = watch::source(key).unwrap();
             let err = commit_episode(
+                None,
                 &Mutex::new(Job::default()),
                 &saved,
                 123,
@@ -1582,6 +2012,7 @@ mod tests {
 
             if fill {
                 commit_episode(
+                    None,
                     &Mutex::new(Job::default()),
                     &saved,
                     123,
@@ -1608,6 +2039,7 @@ mod tests {
                 assert_eq!(response.status(), 200);
                 task.await.unwrap();
                 commit_episode(
+                    None,
                     &Mutex::new(Job::default()),
                     &saved,
                     123,
@@ -1641,6 +2073,161 @@ mod tests {
         }
     }
 
+    #[test]
+    fn show_author_is_optional_bounded_and_invalid_data_does_not_hide_episodes() {
+        let legacy: Show = serde_json::from_str(r#"{"episodes":[1,2]}"#).unwrap();
+        assert!(legacy.author.is_none());
+        assert!(!legacy.cover);
+        for invalid in [
+            serde_json::Value::Null,
+            serde_json::json!({"id":0,"name":"作者"}),
+            serde_json::json!({"id":-1,"name":"作者"}),
+            serde_json::json!({"id":9_007_199_254_740_992i64,"name":"作者"}),
+            serde_json::json!({"id":"29","name":"作者"}),
+            serde_json::json!({"id":29,"name":"   "}),
+            serde_json::json!({"id":29,"name":"x".repeat(161)}),
+            serde_json::json!({"id":29,"name":"作".repeat(161)}),
+            serde_json::json!({"id":29,"name":"作者\n换行"}),
+            serde_json::json!({"id":29,"name":[]}),
+        ] {
+            assert!(author_from_value(&invalid).is_none());
+            let show: Show = serde_json::from_value(serde_json::json!({
+                "episodes":[1,2], "cover":true, "author":invalid
+            }))
+            .unwrap();
+            assert_eq!(show.episodes, [1, 2]);
+            assert!(show.cover);
+            assert!(show.author.is_none());
+            assert!(serde_json::to_value(show).unwrap().get("author").is_none());
+        }
+        let boundary = serde_json::json!({"id":29,"name":"作".repeat(160)});
+        assert_eq!(
+            author_from_value(&boundary).unwrap().name.chars().count(),
+            160
+        );
+    }
+
+    #[test]
+    fn concurrent_show_metadata_writes_preserve_author_cover_and_atomic_json() {
+        let root = std::env::temp_dir().join(format!(
+            "hg-show-writers-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        save_show(&root, 29, vec![1, 2], None, None).unwrap();
+        let author = author_from_value(&serde_json::json!({"id":43,"name":"并发作者"})).unwrap();
+        let cover = b"\x89PNG\r\n\x1a\nfixture";
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let mut writers = Vec::new();
+        for index in 0..8 {
+            let root = root.clone();
+            let author = author.clone();
+            let barrier = barrier.clone();
+            writers.push(std::thread::spawn(move || {
+                barrier.wait();
+                match index {
+                    0 => save_show(&root, 29, vec![1, 2], None, Some(author)),
+                    1 => save_show(
+                        &root,
+                        29,
+                        vec![1, 2],
+                        None,
+                        Some(Author {
+                            id: 0,
+                            name: "invalid".into(),
+                        }),
+                    ),
+                    _ => save_show(&root, 29, vec![1, 2], Some(cover), None),
+                }
+            }));
+        }
+        for writer in writers {
+            writer.join().unwrap().unwrap();
+        }
+        let show = read_show(&root, 29).unwrap();
+        assert_eq!(show.author, Some(author));
+        assert!(show.cover);
+        assert_eq!(show.episodes, [1, 2]);
+        let dir = show_dir(&root, 29);
+        assert_eq!(std::fs::read(dir.join("cover")).unwrap(), cover);
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("info.json")).unwrap()).unwrap();
+        assert_eq!(
+            saved["author"],
+            serde_json::json!({"id":43,"name":"并发作者"})
+        );
+        assert!(!dir.join("cover.tmp").exists());
+        assert!(!dir.join("info.tmp").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn author_only_capture_preserves_concurrent_refresh_episode_list() {
+        let root = std::env::temp_dir().join(format!(
+            "hg-show-author-race-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        save_show(&root, 29, vec![1], None, None).unwrap();
+        let author = author_from_value(&serde_json::json!({"id":43,"name":"并发作者"})).unwrap();
+        let cover = b"\x89PNG\r\n\x1a\nfixture";
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let mut writers = Vec::new();
+        for index in 0..8 {
+            let root = root.clone();
+            let author = author.clone();
+            let barrier = barrier.clone();
+            writers.push(std::thread::spawn(move || {
+                // Prepare the capture intent before the concurrent refresh. It
+                // must not snapshot the old list while waiting for the writer.
+                let episodes = if index == 0 {
+                    ShowEpisodes::Replace((1..=13).collect())
+                } else {
+                    ShowEpisodes::PreserveOrCurrent(1)
+                };
+                barrier.wait();
+                save_show(
+                    &root,
+                    29,
+                    episodes,
+                    Some(cover),
+                    (index == 1).then_some(author),
+                )
+            }));
+        }
+        for writer in writers {
+            writer.join().unwrap().unwrap();
+        }
+        let show = read_show(&root, 29).unwrap();
+        assert_eq!(show.episodes, (1..=13).collect::<Vec<_>>());
+        assert_eq!(show.author, Some(author.clone()));
+        assert!(show.cover);
+        // Explicit detail lists still replace exactly, without preserving or
+        // merging obsolete entries. The following capture preserves that list.
+        save_show(&root, 29, vec![9], None, None).unwrap();
+        save_show(&root, 29, ShowEpisodes::PreserveOrCurrent(1), None, None).unwrap();
+        assert_eq!(read_show(&root, 29).unwrap().episodes, vec![9]);
+        save_show(
+            &root,
+            31,
+            ShowEpisodes::PreserveOrCurrent(7),
+            None,
+            Some(author),
+        )
+        .unwrap();
+        assert_eq!(read_show(&root, 31).unwrap().episodes, vec![7]);
+        let dir = show_dir(&root, 29);
+        assert!(!dir.join("info.tmp").exists());
+        assert!(!dir.join("cover.tmp").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn legacy_show_metadata_and_cover_can_be_added_without_rewriting_episode() {
         let root = std::env::temp_dir().join(format!(
@@ -1666,16 +2253,46 @@ mod tests {
             .unwrap();
         assert_eq!(list(&root).unwrap().len(), 1);
         assert!(read_show(&root, 17).is_none());
+        let metadata = show_dir(&root, 17);
+        fs::create_dir_all(&metadata).await.unwrap();
+        fs::write(
+            metadata.join("info.json"),
+            br#"{"episodes":[3],"cover":false}"#,
+        )
+        .await
+        .unwrap();
+        assert!(read_show(&root, 17).unwrap().author.is_none());
+        let author = author_from_value(&serde_json::json!({
+            "id": 29, "name": "  测试作者  ", "avatar": "https://example.invalid/avatar", "token": "not-author-metadata"
+        })).unwrap();
 
         let cover = b"\x89PNG\r\n\x1a\nfixture";
         let episodes = episode_numbers(&serde_json::json!({ "episodes": [
             {"ep_num": 3}, {"ep_num": 9}, {"ep_num": 1}, {"ep_num": 3}
         ] }));
-        save_show(&root, 17, episodes, Some(cover)).unwrap();
-        save_show(&root, 17, vec![1, 3, 9, 12], None).unwrap();
+        save_show(&root, 17, episodes, None, Some(author.clone())).unwrap();
+        save_show(&root, 17, vec![1, 3, 9, 12], Some(cover), None).unwrap();
+        save_show(
+            &root,
+            17,
+            vec![1, 3, 9, 12],
+            None,
+            Some(Author {
+                id: 0,
+                name: "invalid".into(),
+            }),
+        )
+        .unwrap();
         let show = read_show(&root, 17).unwrap();
         assert_eq!(show.episodes, vec![1, 3, 9, 12]);
         assert!(show.cover);
+        assert_eq!(show.author, Some(author));
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(metadata.join("info.json")).await.unwrap()).unwrap();
+        assert_eq!(
+            saved["author"],
+            serde_json::json!({"id":29,"name":"测试作者"})
+        );
         let response = serve(&cache, "/offline/17/cover", None).await;
         assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
         assert_eq!(response.into_body(), cover);
@@ -1810,7 +2427,7 @@ mod tests {
             let job = Mutex::new(Job::default());
             let failed = tokio::time::timeout(
                 Duration::from_secs(12),
-                commit_episode(&job, &root, 12, 1, "Fixture", &url, &origin, options),
+                commit_episode(None, &job, &root, 12, 1, "Fixture", &url, &origin, options),
             )
             .await
             .unwrap()
@@ -1867,7 +2484,9 @@ mod tests {
             let resumed = Mutex::new(Job::default());
             tokio::time::timeout(
                 Duration::from_secs(12),
-                commit_episode(&resumed, &root, 12, 1, "Fixture", &url, &origin, options),
+                commit_episode(
+                    None, &resumed, &root, 12, 1, "Fixture", &url, &origin, options,
+                ),
             )
             .await
             .unwrap()
@@ -2009,6 +2628,7 @@ mod tests {
             title: "Fixture".into(),
             bytes,
             mp4,
+            media_file: None,
         };
         fs::write(stage.join("info.json"), serde_json::to_vec(&item).unwrap())
             .await
@@ -2128,5 +2748,50 @@ mod tests {
             format!("bytes */{len}")
         );
         fs::remove_dir_all(root).await.unwrap();
+    }
+    #[test]
+    fn cancelled_ready_never_reappears_after_cold_start_or_a_late_worker_write() {
+        let root =
+            std::env::temp_dir().join(format!("hg-cancel-ready-{}", diagnostics::worker_id()));
+        let cache = Cache::default();
+        cache.bind(root.clone());
+        let stage = stage_path(&root, 61);
+        std::fs::create_dir_all(stage.join(HLS_ASSETS)).unwrap();
+        std::fs::create_dir_all(stage.join(HLS_PACKAGE)).unwrap();
+        let ready = files::Ready {
+            id: 61,
+            ep: 1,
+            title: "Fixture".into(),
+            bytes: 1,
+            mp4: false,
+            filename: files::filename("Fixture", 1, 123),
+            watch_key: None,
+        };
+        files::persist_ready(&stage, &ready).unwrap();
+        let mut progress = Job::default();
+        progress.id = 61;
+        progress.ep = 1;
+        let job = Arc::new(Mutex::new(progress));
+        {
+            let mut queue = cache.queue.lock().unwrap();
+            queue.pending.entries.push(Entry::new(
+                61,
+                "Fixture".into(),
+                Some(BTreeSet::from([1])),
+                None,
+            ));
+            queue.active.insert(61, job.clone());
+            queue.pending.persist(&root).unwrap();
+        }
+        cancel_download(&cache, 61).unwrap();
+        assert!(files::read_ready(&stage, 61, None).is_none());
+        assert!(prepare_ready(Some(&cache), &job, &root, &stage, &ready).is_err());
+        // No worker.finish runs here: simulate termination immediately after the cancel command returned.
+        drop(cache);
+        let reopened = Cache::default();
+        reopened.bind(root.clone());
+        assert!(reopened.queue.lock().unwrap().pending.entries.is_empty());
+        assert!(!stage.exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

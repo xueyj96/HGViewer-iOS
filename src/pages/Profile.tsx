@@ -9,7 +9,7 @@ import { api, APP_VERSION, fmtTime, isIos, isMobile, platformLabel } from "../ap
 import { useIOSCoverMenu } from "../components/IOSCoverMenu";
 import type { Detail } from "../types";
 import { useStore } from "../store";
-import { EmptyStatus, LoadingStatus, PageStatus } from "../components/ui";
+import { EmptyStatus, ErrorStatus, LoadingStatus } from "../components/ui";
 import { IClock, IDownload, ISettings, IStar } from "../icons";
 
 const libraryIcons = { fav: IStar, history: IClock, offline: IDownload };
@@ -163,7 +163,7 @@ export default function Profile({ wide, active }: { wide: boolean; active: boole
         }}
           className={isIos ? undefined : `flex-1 h-8 rounded-(--r-ctl) text-[12px] font-semibold pressable ${tab === k ? "tonal text-on-sec" : "text-mut"}`}
           style={!isIos && tab === k ? { background: "var(--p-sec)", color: "var(--p-primary)" } : undefined}>
-          {isIos && <Icon size={14} strokeWidth={1.8} />}
+          {isIos && <Icon size={14} />}
           {label}
         </button>
       );
@@ -211,7 +211,7 @@ export default function Profile({ wide, active }: { wide: boolean; active: boole
               </ShowCoverGrid>
             )}
             {panelLoading && <div className="flex justify-center"><LoadingStatus variant="tail" label="正在加载资料库" /></div>}
-            {!panelLoading && panelFailed && <PageStatus title={panelCards.length ? "部分作品加载失败" : "作品加载失败"} onRetry={() => panelRetry()} />}
+            {!panelLoading && panelFailed && <ErrorStatus message={panelCards.length ? "部分作品加载失败" : "作品加载失败"} active={active && committed} onRetry={() => panelRetry()} />}
             {!panelLoading && panelIds.length === 0 && <EmptyStatus>{panelTab === "fav" ? "还没有收藏" : "还没有观看记录"}</EmptyStatus>}
             {committed && panelHasMore && <div ref={sentinel} aria-hidden="true" className="h-px" />}
           </div>}
@@ -234,7 +234,7 @@ export default function Profile({ wide, active }: { wide: boolean; active: boole
           <div className="text-[24px] font-bold text-on leading-none">资料库</div>
           {isMobile && <button type="button" onClick={() => push({ kind: "settings" })} aria-label="设置"
             className="ml-auto grid size-9 shrink-0 place-items-center rounded-full bg-s3 text-mut pressable">
-            {symbol("gearshape", <ISettings size={19} strokeWidth={1.65} />, 19)}
+            {symbol("gearshape", <ISettings size={19} />, 19)}
           </button>}
         </div>
       )}

@@ -151,4 +151,13 @@ await test('initially absent surface attaches the hold touch guard after page mo
   assert(touch.defaultPrevented, 'touchmove on newly attached surface was not prevented during hold');
 });
 
+await test('inactive retained playback pages do not react to layout events; reactivation restores one listener', async ({ update, logs }) => {
+  await update({ active: false }); logs.length = 0;
+  await act(async () => { window.dispatchEvent(new Event(IOS_LAYOUT_CHANGE)); });
+  assert(logs.length === 0, 'inactive page still handled layout');
+  await update({ active: true }); logs.length = 0;
+  await act(async () => { window.dispatchEvent(new Event(IOS_LAYOUT_CHANGE)); });
+  assert(logs.filter(entry => entry.name === 'cancelTap').length === 1, 'reactivation missed or duplicated layout handler');
+});
+
 document.querySelector('#results')!.textContent = JSON.stringify({ passed: results.filter(r=>r.passed).length, failed: results.filter(r=>!r.passed).length, results }, null, 2);

@@ -1,4 +1,8 @@
 export type Author = { id: number; name: string; avatar?: string; followers?: number };
+export type AuthorProfile = {
+  id: number; nickname: string; username: string; avatar?: string; desc?: string; sign?: string;
+  counts: { video: number; post: number; follower: number; following: number; like: number; collect: number };
+};
 
 export type VideoCard = {
   id: number;

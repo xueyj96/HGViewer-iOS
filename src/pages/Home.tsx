@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appendUniqueById } from "../collections";
 import LinePicker from "../components/LinePicker";
 import Feed from "../components/Feed";
@@ -8,6 +8,7 @@ import type { VideoCard } from "../types";
 import { useStore } from "../store";
 import { CompactAction, LoadingStatus } from "../components/ui";
 import { ISearch, IVol, IVolMute } from "../icons";
+import { useToastFeedback } from "../components/useToastFeedback";
 
 export default function Home({ active, bottomInset }: { active: boolean; bottomInset: number }) {
   const { muted, setMuted, setTab, toast, fs } = useStore();
@@ -18,6 +19,7 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
   const [initialError, setInitialError] = useState("");
   const [done, setDone] = useState(false);
   const loadingRef = useRef(false);
+  useToastFeedback(initialError, active);
 
   const load = useCallback(async (p: number) => {
     if (loadingRef.current || done) return;
@@ -42,16 +44,19 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
 
   useEffect(() => { if (!items.length) load(1); /* eslint-disable-next-line */ }, []);
 
-  const ids = items.map((v) => v.id);
+  const { ids, cardsById } = useMemo(() => ({
+    ids: items.map(({ id }) => id),
+    cardsById: new Map(items.map((item) => [item.id, item])),
+  }), [items]);
 
   return (
     <div className="hg-home-video absolute inset-0 bg-black">
       {items.length ? (
-        <Feed videoIds={ids} mode="home" active={active} bottomInset={bottomInset}
+        <Feed videoIds={ids} cardsById={cardsById} mode="home" active={active} bottomInset={bottomInset}
           onNearEnd={() => { if (!loading && !done) load(page + 1); }} />
       ) : initialError || done ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-white">
-          <p role="status" className="text-sm text-white/80">{initialError || "暂时没有可播放的内容"}</p>
+          {!initialError && <p role="status" className="text-sm text-white/80">暂时没有可播放的内容</p>}
           {initialError && <div className={`flex flex-wrap justify-center ${isIos ? "gap-1" : "gap-2"}`}>
             {isIos ? <>
               <CompactAction tone="neutral" onClick={() => void load(1)}>重试</CompactAction>
@@ -73,7 +78,7 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
           <button type="button" aria-label="搜索" onClick={() => setTab("search")}
             className="flex min-w-0 flex-1 h-11 items-center justify-center gap-2 px-2 text-[13px]">
             <ISearch size={16} />
-            <span className="truncate">搜索短剧、作者、题材…</span>
+            <span className="truncate">搜索短剧、题材…</span>
           </button>
         </IOSPageBar>
       )}

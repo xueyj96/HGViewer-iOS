@@ -38,23 +38,23 @@ export function DesktopTitleBar({ collapsed, onToggle }: { collapsed: boolean; o
         <span>HG<span className="win-wordmark-light">hub</span></span>
       </div>
       <button className="win-caption-tool" aria-label={collapsed ? "展开侧栏" : "收起侧栏"} onClick={onToggle}>
-        <ISidebar size={17} strokeWidth={1.7} />
+        <ISidebar size={17} />
       </button>
       <div className="win-drag-region" data-tauri-drag-region />
       <button className="win-caption-tool" aria-label="切换外观" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-        {theme === "dark" ? <ISun size={17} strokeWidth={1.7} /> : <IMoon size={17} strokeWidth={1.7} />}
+        {theme === "dark" ? <ISun size={17} /> : <IMoon size={17} />}
       </button>
       <button className="win-caption-tool" aria-label={searchLabel} onClick={() => setTab(searchKey)}>
-        <SearchIcon size={17} strokeWidth={1.7} />
+        <SearchIcon size={17} />
       </button>
       {/* macOS 用系统自带的红绿灯（titleBarStyle: Overlay），不画自绘按钮 */}
       {platform !== "macos" && (
         <div className="win-caption-buttons">
-          <button aria-label="最小化" onClick={() => appWindow().minimize().catch(() => {})}><IMinus size={15} strokeWidth={1.5} /></button>
+          <button aria-label="最小化" onClick={() => appWindow().minimize().catch(() => {})}><IMinus size={15} /></button>
           <button aria-label={maxed ? "还原" : "最大化"} onClick={() => appWindow().toggleMaximize().catch(() => {})}>
-            {maxed ? <IRestore size={14} strokeWidth={1.5} /> : <ISquare size={14} strokeWidth={1.5} />}
+            {maxed ? <IRestore size={14} /> : <ISquare size={14} />}
           </button>
-          <button className="win-close" aria-label="关闭" onClick={() => appWindow().close().catch(() => {})}><IClose size={16} strokeWidth={1.5} /></button>
+          <button className="win-close" aria-label="关闭" onClick={() => appWindow().close().catch(() => {})}><IClose size={16} /></button>
         </div>
       )}
     </header>
@@ -74,7 +74,7 @@ export function DesktopRail({ collapsed }: { collapsed: boolean }) {
       <div className="win-sidebar-inner">
         <button className={`win-search-launch ${onTab(searchKey) ? "is-selected" : ""}`}
           onClick={() => setTab(searchKey)} aria-label={searchLabel}>
-          <SearchIcon size={19} strokeWidth={1.7} />
+          <SearchIcon size={19} />
           <span className="win-nav-copy">搜索你感兴趣的</span>
           <kbd className="win-nav-key">/</kbd>
         </button>
@@ -83,20 +83,20 @@ export function DesktopRail({ collapsed }: { collapsed: boolean }) {
             <button key={key} aria-label={label} aria-current={onTab(key) ? "page" : undefined}
               className={`win-nav-item ${onTab(key) ? "is-selected" : ""}`}
               onClick={() => setTab(key)}>
-              <span className="win-nav-symbol">{onTab(key) ? <SelectedIcon size={21} /> : <Icon size={21} strokeWidth={1.7} />}</span>
+              <span className="win-nav-symbol">{onTab(key) ? <SelectedIcon size={21} /> : <Icon size={21} />}</span>
               <span className="win-nav-copy">{label}</span>
             </button>
           ))}
           <button aria-label="排行榜" className={`win-nav-item ${railPage === "ranks" ? "is-selected" : ""}`}
             aria-current={railPage === "ranks" ? "page" : undefined}
             onClick={() => { if (railPage !== "ranks") push({ kind: "ranks" }); }}>
-            <span className="win-nav-symbol"><ITrophy size={21} strokeWidth={1.7} /></span>
+            <span className="win-nav-symbol"><ITrophy size={21} /></span>
             <span className="win-nav-copy">排行榜</span>
           </button>
           <button aria-label="设置" className={`win-nav-item ${railPage === "settings" ? "is-selected" : ""}`}
             aria-current={railPage === "settings" ? "page" : undefined}
             onClick={() => { if (railPage !== "settings") push({ kind: "settings" }); }}>
-            <span className="win-nav-symbol"><ISettings size={21} strokeWidth={1.7} /></span>
+            <span className="win-nav-symbol"><ISettings size={21} /></span>
             <span className="win-nav-copy">设置</span>
           </button>
         </div>

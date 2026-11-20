@@ -113,6 +113,23 @@ try {
     assert(source().playUrl.includes("2%2F1") || source().playUrl.includes("/2/1"), "selected source wrong");
     assert(plays.filter((id) => id === 2).length === (expired ? 2 : 1), "preload reuse/expiry contract changed");
   });
+  await test("selecting and reactivating a pending adjacent episode joins the same resolution", async ({ update, source, plays, preloads }) => {
+    const pending = deferred<Awaited<ReturnType<typeof api.play>>>();
+    const play = api.play;
+    api.play = (id, ep) => {
+      if (id === 2) { plays.push(id); return pending.promise; }
+      return play(id, ep);
+    };
+    await update();
+    await update({ readyToPreload: true, candidates: [{ id: 2, ep: 1 }] });
+    await act(async () => wait(510));
+    await update({ curId: 2, readyToPreload: false, candidates: [] });
+    await update({ active: false });
+    await update({ active: true });
+    assert(plays.join() === "1,2" && preloads.length === 0, "pending address requested again");
+    await act(async () => pending.resolve({ id: 2, ep_num: 1, duration: 60, title: "fixture", video_url: "https://fixture.invalid/joined.m3u8" }));
+    assert(source().playUrl.includes("joined.m3u8") && plays.join() === "1,2", "active selection did not adopt preloaded address");
+  });
   await test("adjacent requests remain serial and preserve candidate order", async ({ update, plays, preloads }) => {
     const pending = deferred<Awaited<ReturnType<typeof api.play>>>(); const play = api.play;
     api.play = (id, ep) => { if (id === 2) { plays.push(id); return pending.promise; } return play(id, ep); };
@@ -130,6 +147,23 @@ try {
     Object.defineProperty(document, "hidden", { configurable: true, value: true });
     await update(); await update({ readyToPreload: true, candidates: [{ id: 2, ep: 1 }] }); await act(async () => wait(510));
     assert(plays.length === 1 && !preloads.length, "background prefetch ran");
+  });
+  await test("line revision invalidates stream URLs without changing the selected content", async ({ update, source, plays }) => {
+    await update({ curEp: 2 }); const oldUrl = source().playUrl;
+    api.play = async (id, ep) => { plays.push(id); return { id, ep_num: ep, duration: 60, title: "new line", video_url: "https://new-line.invalid/selected-episode.m3u8" }; };
+    await update({ lineRevision: 1 });
+    assert(plays.length === 2 && source().playUrl !== oldUrl && source().nativeSource.kind === "online", "line revision reused old stream");
+    const resolved = source().nativeSource;
+    assert(resolved.kind === "online" && resolved.url.includes("new-line.invalid"), "new line source not selected");
+  });
+  await test("a retired line response cannot overwrite the current stream", async ({ update, source }) => {
+    const old = deferred<Awaited<ReturnType<typeof api.play>>>(); api.play = () => old.promise;
+    await update();
+    api.play = async (id, ep) => ({ id, ep_num: ep, duration: 60, title: "current", video_url: "https://current.invalid/video.m3u8" });
+    await update({ lineRevision: 1 });
+    const current = source().playUrl;
+    await act(async () => old.resolve({ id: 1, ep_num: 1, duration: 60, title: "retired", video_url: "https://retired.invalid/video.m3u8" }));
+    assert(source().playUrl === current && !current.includes("retired.invalid"), "retired line published over current data");
   });
 } catch (error) { results.push({ name: "fixture setup", passed: false, error: String(error) }); }
 finally {

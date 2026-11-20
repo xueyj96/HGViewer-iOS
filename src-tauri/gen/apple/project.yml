@@ -54,8 +54,8 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 1.2.5
-        CFBundleVersion: 1.2.5
+        CFBundleShortVersionString: 1.2.23
+        CFBundleVersion: 1.2.23
     entitlements:
       path: huangguo-client_iOS/huangguo-client_iOS.entitlements
     scheme:
@@ -73,6 +73,9 @@ targets:
         EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
       groups: [app]
     dependencies:
+      - framework: ../../../build/remux/HGRemux.xcframework
+        embed: true
+        codeSign: true
       - framework: libapp.a
         embed: false
       - sdk: CoreGraphics.framework

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { IOS_LAYOUT_CHANGE } from "../iosGeometry";
 import { edgeSwipeSide } from "./edgeSwipe";
 import { IOSSegmentFrame, paintSegment, segmentRect } from "./IOSSegments";
@@ -149,7 +150,9 @@ export function useIOSTabSwipe({ index, count, onChange, enabled }: Options) {
       if (Math.max(Math.abs(dx), dy) < 8) return;
       if (-direction * dx <= dy * 1.2) { drag.current = null; return; }
       pending.current = start.target;
-      setPreview(start.target);
+      // Pointer moves are continuous React events. Mount the neighbour before the
+      // imperative transform exposes it; otherwise one paint can reveal empty space.
+      flushSync(() => setPreview(start.target));
       event.currentTarget.setPointerCapture(event.pointerId);
     }
     const elapsed = event.timeStamp - start.time;

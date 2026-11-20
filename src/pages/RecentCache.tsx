@@ -1,17 +1,21 @@
 import { useState } from "react";
 import { api, type RecentPlayback } from "../api";
 import { CacheDeleteDialog, CachePageFrame, cacheSize } from "../components/CachePageFrame";
-import { CompactAction, EmptyStatus, PageStatus } from "../components/ui";
+import { CompactAction, EmptyStatus, ErrorStatus } from "../components/ui";
+import { useToastFeedback } from "../components/useToastFeedback";
 import { useOfflineStatus } from "../components/useOfflineStatus";
 import { IDownload, ITrash } from "../icons";
 
 export default function RecentCache({ onBack, active }: { onBack: () => void; active: boolean }) {
-  const { state, readError, refresh, busy, actionError: error, runAction: run } = useOfflineStatus(active);
+  const { state, readError, refresh, busy, runAction: run } = useOfflineStatus(active);
   const [pending, setPending] = useState<RecentPlayback>();
   const groups = new Map<number, RecentPlayback[]>();
   const recent = state?.recent ?? [];
   const jobs = new Map(state?.jobs.map((job) => [job.id, job]));
   const last = state?.last;
+  const showsLast = last?.watch_key != null && recent.some((item) => item.key === last.watch_key);
+  const lastMessage = showsLast && last.message !== "缓存完成" ? last.message : "";
+  useToastFeedback(lastMessage, active, showsLast ? `offline-job:${last.id}:${last.ep}:${last.watch_key ?? ""}` : undefined);
 
   for (const item of recent) {
     const group = groups.get(item.id);
@@ -36,11 +40,7 @@ export default function RecentCache({ onBack, active }: { onBack: () => void; ac
         </div>
         <p className="mt-1 text-xs leading-relaxed text-mut">保留后可离线播放。</p>
       </section>}
-      {readError && <PageStatus title="缓存读取失败" onRetry={() => void refresh().catch(() => {})} />}
-      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-      {last?.watch_key != null && last.message && last.message !== "缓存完成" &&
-        recent.some((item) => item.key === last.watch_key) &&
-        <p role="status" className="text-xs text-mut">{last.message}</p>}
+      {readError && <ErrorStatus message="缓存读取失败" notify={false} onRetry={() => void refresh().catch(() => {})} />}
       {!state && !readError && <p role="status" className="text-sm text-mut">正在读取缓存…</p>}
       {state && !groups.size && !readError && <EmptyStatus>暂无最近播放缓存</EmptyStatus>}
       {[...groups].map(([id, items]) => (

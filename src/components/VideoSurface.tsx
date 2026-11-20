@@ -208,7 +208,7 @@ const VideoSurface = forwardRef<VideoHandle, VideoSurfaceProps>(function VideoSu
       onPlaying={() => onPlaying?.()}
       onEnded={() => onEnded?.()}
       onError={() => {
-        if ((isIos || presentation === "article") && !hlsRef.current) onError?.("视频暂时无法播放，请稍后重试");
+        if (!hlsRef.current) onError?.("视频暂时无法播放，请稍后重试");
       }}
     />
   );

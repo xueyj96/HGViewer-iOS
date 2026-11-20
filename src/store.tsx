@@ -1,10 +1,15 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, platform as envPlatform, type OfflineEpisode } from "./api";
 import { isStrictSecurity, setStrictSecurity as setHtmlStrictSecurity } from "./html";
-import { DEFAULT_PLAYBACK_SIDEBAR, normalizePlaybackSidebar, type PlaybackSidebarItem } from "./playbackSidebar";
-import { addHistory as calculateAddedHistory, normalizeHistory, restoreHistory as calculateRestoredHistory, type WatchProgress } from "./watchHistory";
+import type { PlaybackSidebarItem } from "./playbackSidebar";
+import { addHistory as calculateAddedHistory, restoreHistory as calculateRestoredHistory, type WatchProgress } from "./watchHistory";
 import type { User } from "./types";
 import type { Tab } from "./workspaceTabs";
+import { setMembership } from "./collections";
+import { loadPreferences, PREFERENCES_KEY, type PersistedPreferences } from "./persistedPreferences";
+import { ToastProvider, useToastActions, type Toast, type ToastAction } from "./toasts";
+import { useAccountSession, type Authentication, type AuthenticationResult } from "./components/useAccountSession";
+export type { Toast, ToastAction } from "./toasts";
 
 export type { Tab } from "./workspaceTabs";
 export { HISTORY_LIMIT, type WatchProgress } from "./watchHistory";
@@ -32,6 +37,7 @@ export type PageInput =
   | FeedContext
   | { kind: "channel"; cate: string; name: string }
   | { kind: "ranks" }
+  | { kind: "author"; id: number; name?: string }
   | { kind: "settings" }
   | { kind: "offline"; id?: number; title?: string; episodes?: number[] }
   | { kind: "recent-cache" }
@@ -39,38 +45,6 @@ export type PageInput =
   | { kind: "post"; id: number; postIds?: number[]; nextPostPage?: number };
 
 export type Page = PageInput & { key: string };
-
-export type ToastAction = { label: string; run: () => void; scope?: "history" };
-export type Toast = { id: number; msg: string; icon?: "ok" | "heart" | "star" | "info"; action?: ToastAction };
-
-type Persist = {
-  likes: number[];
-  favs: number[];
-  history: WatchProgress[];
-  follows: number[];
-  muted: boolean;
-  volume: number;
-  searchHist: string[];
-  playbackSidebar: PlaybackSidebarItem[];
-};
-
-const LS = "hghub_app_v1";
-const DEFAULTS: Persist = {
-  likes: [], favs: [], history: [], follows: [],
-  muted: true, volume: 0.7, searchHist: [], playbackSidebar: DEFAULT_PLAYBACK_SIDEBAR,
-};
-
-function loadPersist(): Persist {
-  try {
-    const raw = localStorage.getItem(LS);
-    if (!raw) return DEFAULTS;
-    const p = { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Persist>) };
-    const historyNow = Array.isArray(p.history) ? Date.now() : 0;
-    return { ...p, history: normalizeHistory(p.history, historyNow), playbackSidebar: normalizePlaybackSidebar(p.playbackSidebar) };
-  } catch {
-    return DEFAULTS;
-  }
-}
 
 const LIGHT_APPEARANCE = "(prefers-color-scheme: light)";
 
@@ -93,14 +67,14 @@ type Store = {
   theme: Theme; themePreference: ThemePreference; setTheme: (t: ThemePreference) => void;
   tab: Tab; setTab: (t: Tab) => void;
   stack: Page[]; push: (p: PageInput) => void; pop: () => void;
-  deleteOffline: (id: number, episode?: number) => Promise<void>;
+  deleteOffline: (id: number, episode?: number, player?: () => { key: string; id: number; ep: number }) => Promise<void>;
   lineRevision: number; onLineChanged: () => void;
-  user: User | null; setUser: (u: User | null) => void;
+  user: User | null; authenticate: (request: Authentication) => Promise<AuthenticationResult>;
   loginOpen: boolean; setLoginOpen: (b: boolean) => void;
   logout: () => Promise<void>;
   likes: number[]; favs: number[]; history: WatchProgress[]; follows: number[];
   isLiked: (id: number) => boolean; isFav: (id: number) => boolean;
-  toggleLikeLocal: (id: number) => boolean;
+  setLikedLocal: (id: number, on: boolean) => void;
   setFavLocal: (id: number, on: boolean, index?: number) => void;
   syncFavorite: (id: number, on: boolean, kind?: "video" | "post") => Promise<void>;
   /** 记一条观看记录；`ep/t/dur` 省略时保留原进度，`ep` 变了就把进度归零 */
@@ -108,7 +82,7 @@ type Store = {
   removeHistory: (id: number) => void;
   restoreHistory: (entry: WatchProgress) => void;
   clearHistory: () => void;
-  toggleFollowLocal: (uid: number) => boolean;
+  setFollowedLocal: (uid: number, on: boolean) => void;
   theater: boolean; setTheater: (v: boolean | ((p: boolean) => boolean)) => void;
   fs: boolean; setFs: (v: boolean | ((p: boolean) => boolean)) => void;
   muted: boolean; setMuted: (v: boolean | ((p: boolean) => boolean)) => void;
@@ -117,8 +91,7 @@ type Store = {
   playbackSidebar: PlaybackSidebarItem[];
   setPlaybackSidebar: (update: (items: PlaybackSidebarItem[]) => PlaybackSidebarItem[]) => void;
   strictSecurity: boolean; strictSecurityReady: boolean; securityPending: boolean; cliRelaxed: boolean; setStrictSecurity: (on: boolean) => Promise<void>;
-  toasts: Toast[]; toast: (msg: string, icon?: Toast["icon"], action?: ToastAction) => void;
-  dismissToast: (id: number) => void;
+  toast: (msg: string, icon?: Toast["icon"], action?: ToastAction) => void;
 };
 
 const Ctx = createContext<Store>(null as unknown as Store);
@@ -126,27 +99,37 @@ export const useStore = () => useContext(Ctx);
 let seq = 0;
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [p, setP] = useState<Persist>(loadPersist);
+  return <ToastProvider><AppStateProvider>{children}</AppStateProvider></ToastProvider>;
+}
+
+function AppStateProvider({ children }: { children: React.ReactNode }) {
+  const { toast, clearHistoryToasts } = useToastActions();
+  const [p, setP] = useState<PersistedPreferences>(loadPreferences);
   const [themePreference, setThemePreference] = useState<ThemePreference>(readThemePreference);
   const [systemLight, setSystemLight] = useState(() => window.matchMedia(LIGHT_APPEARANCE).matches);
   const theme: Theme = themePreference === "system" ? (systemLight ? "light" : "dark") : themePreference;
   const [tab, setTabRaw] = useState<Tab>("home");
   const [stack, setStack] = useState<Page[]>([]);
   const [lineRevision, setLineRevision] = useState(0);
-  const lineChanged = useRef(false);
-  const [user, setUser] = useState<User | null>(null);
   const favoriteSync = useRef(new Map<string, Promise<void>>());
-  const favoriteSession = useRef({ userId: user?.id, lineRevision });
-  favoriteSession.current = { userId: user?.id, lineRevision };
   const [loginOpen, setLoginOpen] = useState(false);
-  const [toasts, setToasts] = useState<Toast[]>([]);
   const [theater, setTheaterState] = useState(false);
   const [fs, setFsState] = useState(false);
   const [strictSecurity, setStrictSecurityState] = useState<boolean>(isStrictSecurity);
   const [cliRelaxed, setCliRelaxed] = useState(false);
   const [strictSecurityReady, setStrictSecurityReady] = useState(false);
   const [securityPending, setSecurityPending] = useState(false);
-  const toastSeq = useRef(0);
+  const onBoot = useCallback((boot: Awaited<ReturnType<typeof api.boot>>) => {
+    if (typeof boot.strict_security === "boolean") {
+      setStrictSecurityState(boot.strict_security);
+      setHtmlStrictSecurity(boot.strict_security);
+      setStrictSecurityReady(true);
+    }
+    setCliRelaxed(!!boot.cli_relaxed);
+  }, []);
+  const { user, authenticate, logout, resetAccount } = useAccountSession(onBoot, toast);
+  const favoriteSession = useRef({ userId: user?.id, lineRevision });
+  favoriteSession.current = { userId: user?.id, lineRevision };
 
   useEffect(() => {
     const appearance = window.matchMedia(LIGHT_APPEARANCE);
@@ -163,28 +146,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [themePreference]);
 
   useEffect(() => {
-    try { localStorage.setItem(LS, JSON.stringify(p)); } catch { /* ignore */ }
+    try { localStorage.setItem(PREFERENCES_KEY, JSON.stringify(p)); } catch { /* ignore */ }
   }, [p]);
 
   const onLineChanged = useCallback(() => {
-    lineChanged.current = true;
-    setUser(null);
+    resetAccount();
     setLineRevision((value) => value + 1);
-  }, []);
-
-  useEffect(() => {
-    api.boot()
-      .then((r) => {
-        if (!lineChanged.current && r.user && (r.user as User).id) setUser(r.user as User);
-        if (typeof r.strict_security === "boolean") {
-          setStrictSecurityState(r.strict_security);
-          setHtmlStrictSecurity(r.strict_security);
-          setStrictSecurityReady(true);
-        }
-        setCliRelaxed(!!r.cli_relaxed);
-      })
-      .catch(() => { /* 离线也能用 */ });
-  }, []);
+  }, [resetAccount]);
 
   const setStrictSecurity = useCallback(async (on: boolean) => {
     if (!strictSecurityReady) throw new Error("安全设置尚未读取，请重新启动应用");
@@ -198,33 +166,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [strictSecurityReady]);
 
-  const dismissToast = useCallback((id: number) => setToasts((items) => items.filter((item) => item.id !== id)), []);
-  const toast = useCallback((msg: string, icon?: Toast["icon"], action?: ToastAction) => {
-    const id = ++toastSeq.current;
-    setToasts((t) => [...t.slice(-2), { id, msg, icon, action }]);
-    window.setTimeout(() => dismissToast(id), action ? 6500 : 2200);
-  }, [dismissToast]);
-
   const setTab = useCallback((t: Tab) => { setTabRaw(t); setStack([]); }, []);
   const push = useCallback((pg: PageInput) => {
-    setStack((s) => [...s, { ...pg, key: `p${++seq}` }]);
+    const page = { ...pg, key: `p${++seq}` };
+    setStack((s) => [...s, page]);
   }, []);
   const pop = useCallback(() => setStack((s) => s.slice(0, -1)), []);
-  const deleteOffline = useCallback(async (id: number, episode?: number) => {
+  const deleteOffline = useCallback(async (id: number, episode?: number, player?: () => { key: string; id: number; ep: number }) => {
     await api.offlineDelete(id, episode);
-    // A suspended player may still hold file paths from before cache management.
-    setStack((pages) => pages.filter((page) => page.kind !== "feed" || !page.offlineItems?.some(
-      (item) => item.id === id && (episode === undefined || item.ep === episode),
-    )));
+    const currentPlayer = player?.();
+    // The inline player observes live cache updates. Keep it when another episode
+    // is deleted; close it when its actual playing file is removed, including files
+    // downloaded after the route was created. Suspended players retain the old safety rule.
+    setStack((pages) => pages.filter((page) => {
+      if (page.kind !== "feed") return true;
+      if (currentPlayer && page.key === currentPlayer.key) {
+        // If the user left this show during deletion, retire the old multi-show
+        // route too: its immutable videoIds may otherwise lead back to removed files.
+        return currentPlayer.id === id && episode !== undefined && currentPlayer.ep !== episode;
+      }
+      return !page.offlineItems?.some(item => item.id === id && (episode === undefined || item.ep === episode));
+    }));
   }, []);
 
-  const toggleLikeLocal = useCallback((id: number) => {
-    let on = false;
+  const setLikedLocal = useCallback((id: number, on: boolean) => {
     setP((s) => {
-      on = !s.likes.includes(id);
-      return { ...s, likes: on ? [id, ...s.likes] : s.likes.filter((x) => x !== id) };
+      const likes = setMembership(s.likes, id, on);
+      return likes === s.likes ? s : { ...s, likes };
     });
-    return on;
   }, []);
   const syncFavorite = useCallback((id: number, on: boolean, kind: "video" | "post" = "video"): Promise<void> => {
     const userId = user?.id;
@@ -248,29 +217,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setFavLocal = useCallback((id: number, on: boolean, index = 0) => {
     setP((s) => {
-      if (s.favs.includes(id) === on) return s;
-      const favs = on ? [...s.favs.slice(0, index), id, ...s.favs.slice(index)] : s.favs.filter((item) => item !== id);
-      return { ...s, favs };
+      const favs = setMembership(s.favs, id, on, index);
+      return favs === s.favs ? s : { ...s, favs };
     });
   }, []);
-  const toggleFollowLocal = useCallback((uid: number) => {
-    let on = false;
+  const setFollowedLocal = useCallback((uid: number, on: boolean) => {
     setP((s) => {
-      on = !s.follows.includes(uid);
-      return { ...s, follows: on ? [uid, ...s.follows] : s.follows.filter((x) => x !== uid) };
+      const follows = setMembership(s.follows, uid, on);
+      return follows === s.follows ? s : { ...s, follows };
     });
-    return on;
   }, []);
   const addHistory = useCallback((id: number, ep?: number, t?: number, dur?: number) => {
     if (!id) return;
+    const now = Date.now();
     setP((s) => {
-      return { ...s, history: calculateAddedHistory(s.history, id, ep, t, dur, Date.now()) };
+      return { ...s, history: calculateAddedHistory(s.history, id, ep, t, dur, now) };
     });
   }, []);
   const clearHistory = useCallback(() => {
     setP((s) => ({ ...s, history: [] }));
-    setToasts((items) => items.filter((item) => item.action?.scope !== "history"));
-  }, []);
+    clearHistoryToasts();
+  }, [clearHistoryToasts]);
   const removeHistory = useCallback((id: number) => {
     setP((s) => ({ ...s, history: s.history.filter((entry) => entry.id !== id) }));
   }, []);
@@ -287,12 +254,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setP((s) => ({ ...s, searchHist: [t, ...s.searchHist.filter((x) => x !== t)].slice(0, 12) }));
   }, []);
   const clearSearchHist = useCallback(() => setP((s) => ({ ...s, searchHist: [] })), []);
-
-  const logout = useCallback(async () => {
-    try { await api.logout(); } catch { /* ignore */ }
-    setUser(null);
-    toast("已退出登录", "info");
-  }, [toast]);
 
   const setTheater = useCallback((v: boolean | ((prev: boolean) => boolean)) => {
     setTheaterState((prev) => (typeof v === "function" ? (v as (p: boolean) => boolean)(prev) : v));
@@ -318,20 +279,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     platform: envPlatform,
     theme, themePreference, setTheme: setThemePreference,
     tab, setTab, stack, push, pop, deleteOffline,
-    lineRevision, onLineChanged, user, setUser, loginOpen, setLoginOpen, logout,
+    lineRevision, onLineChanged, user, authenticate, loginOpen, setLoginOpen, logout,
     likes: p.likes, favs: p.favs, history: p.history, follows: p.follows,
     isLiked: (id) => p.likes.includes(id),
     isFav: (id) => p.favs.includes(id),
-    toggleLikeLocal, setFavLocal, syncFavorite, toggleFollowLocal, addHistory, removeHistory, restoreHistory, clearHistory,
+    setLikedLocal, setFavLocal, syncFavorite, setFollowedLocal, addHistory, removeHistory, restoreHistory, clearHistory,
     muted: p.muted, setMuted, volume: p.volume, setVolume, theater, setTheater, fs, setFs,
     searchHist: p.searchHist, addSearch, clearSearchHist,
     playbackSidebar: p.playbackSidebar, setPlaybackSidebar,
     strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity,
-    toasts, toast, dismissToast,
-  }), [theme, themePreference, tab, setTab, stack, push, pop, deleteOffline, lineRevision, onLineChanged, user, loginOpen, logout,
-    p, toggleLikeLocal, setFavLocal, syncFavorite, toggleFollowLocal, addHistory, removeHistory, restoreHistory, clearHistory,
+    toast,
+  }), [theme, themePreference, tab, setTab, stack, push, pop, deleteOffline, lineRevision, onLineChanged, user, authenticate, loginOpen, logout,
+    p, setLikedLocal, setFavLocal, syncFavorite, setFollowedLocal, addHistory, removeHistory, restoreHistory, clearHistory,
     setMuted, setVolume, addSearch, clearSearchHist, setPlaybackSidebar, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity,
-    toasts, toast, dismissToast, theater, setTheater, fs, setFs]);
+    toast, theater, setTheater, fs, setFs]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

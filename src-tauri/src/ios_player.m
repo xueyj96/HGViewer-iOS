@@ -4,12 +4,15 @@
 #import <objc/runtime.h>
 #include <math.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdint.h>
 
 typedef struct {
     double time, duration, width, height;
     int32_t status, ready, app_state, error_domain, underlying_domain;
     int64_t error_code, underlying_code;
+    double native_elapsed_ms, item_ready_ms, layer_ready_ms;
+    int32_t warm_asset, standby_hit;
 } HGPlayerSnapshot;
 
 typedef enum {
@@ -18,9 +21,66 @@ typedef enum {
 } HGPlayerAction;
 
 typedef struct { double x, y, width, height, top, bottom; bool viewport; } HGPlayerRect;
+typedef struct { double close_ms, attach_ms; } HGPlayerOpenTiming;
+
+static char itemReadyContext, layerReadyContext;
+
+@interface HGStartupTiming : NSObject {
+    CFTimeInterval _startedAt;
+    _Atomic(int64_t) _itemReadyUs;
+    _Atomic(int64_t) _layerReadyUs;
+}
+@property(nonatomic, copy) dispatch_block_t firstFrame;
+- (double)elapsedMs;
+- (void)writeToSnapshot:(HGPlayerSnapshot *)snapshot;
+@end
+
+static bool RecordFirstReady(_Atomic(int64_t) *time, CFTimeInterval start) {
+    int64_t unset = -1;
+    int64_t elapsed = llround((CACurrentMediaTime() - start) * 1000000);
+    return atomic_compare_exchange_strong(time, &unset, elapsed);
+}
+
+@implementation HGStartupTiming
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _startedAt = CACurrentMediaTime();
+        atomic_init(&_itemReadyUs, -1);
+        atomic_init(&_layerReadyUs, -1);
+    }
+    return self;
+}
+
+- (double)elapsedMs { return (CACurrentMediaTime() - _startedAt) * 1000; }
+
+- (void)writeToSnapshot:(HGPlayerSnapshot *)snapshot {
+    snapshot->item_ready_ms = atomic_load(&_itemReadyUs) / 1000.0;
+    snapshot->layer_ready_ms = atomic_load(&_layerReadyUs) / 1000.0;
+    snapshot->native_elapsed_ms = [self elapsedMs];
+}
+
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object
+                       change:(NSDictionary<NSKeyValueChangeKey, id> *)change context:(void *)context {
+    NSNumber *value = change[NSKeyValueChangeNewKey];
+    if (context == &itemReadyContext) {
+        if (value.integerValue == AVPlayerItemStatusReadyToPlay) RecordFirstReady(&_itemReadyUs, _startedAt);
+    } else if (context == &layerReadyContext) {
+        if (value.boolValue && RecordFirstReady(&_layerReadyUs, _startedAt) && self.firstFrame) self.firstFrame();
+    } else {
+        [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+    }
+}
+@end
 
 @interface HGPlayerView : UIView
 @property(nonatomic, strong) AVPlayer *player;
+@property(nonatomic, strong) HGStartupTiming *startupTiming;
+@property(nonatomic, strong) AVPlayerItem *observedStartupItem;
+@property(nonatomic) BOOL observingStartupLayer;
+@property(nonatomic) int32_t warmAssetState;
+@property(nonatomic) BOOL adoptedStandby;
+- (void)stopStartupObservers;
 @property(nonatomic, strong) UIView *slideBackdrop;
 @property(nonatomic) NSUInteger slideVersion;
 @property(nonatomic) CGPoint pullOffset;
@@ -36,13 +96,149 @@ typedef struct { double x, y, width, height, top, bottom; bool viewport; } HGPla
 
 @implementation HGPlayerView
 + (Class)layerClass { return AVPlayerLayer.class; }
+
+- (void)stopStartupObservers {
+    [self.observedStartupItem removeObserver:self.startupTiming forKeyPath:@"status" context:&itemReadyContext];
+    self.observedStartupItem = nil;
+    if (self.observingStartupLayer) {
+        [self.layer removeObserver:self.startupTiming forKeyPath:@"readyForDisplay" context:&layerReadyContext];
+        self.observingStartupLayer = NO;
+    }
+}
+
+- (void)dealloc { [self stopStartupObservers]; }
 @end
 
-static char playerKey, tokenKey, warmAssetsKey;
+static char playerKey, tokenKey, warmAssetsKey, standbyKey, standbyStatusContext;
+static const NSTimeInterval HGStandbyLifetime = 12.0;
+static const NSUInteger HGStandbyLimit = 2;
+
+@interface HGStandbyPlayer : NSObject
+@property(nonatomic, weak) WKWebView *web;
+@property(nonatomic, strong) NSURL *url;
+@property(nonatomic, strong) AVURLAsset *asset;
+@property(nonatomic, strong) AVPlayer *player;
+@property(nonatomic, strong) id backgroundObserver;
+@property(nonatomic) uint64_t owner;
+@property(nonatomic) BOOL observing;
+@property(nonatomic) BOOL started;
+@property(nonatomic) BOOL ready;
+- (void)tryPreroll;
+@end
+
+static NSMutableArray<HGStandbyPlayer *> *Standbys(WKWebView *web) {
+    return objc_getAssociatedObject(web, &standbyKey);
+}
+
+static HGStandbyPlayer *StandbyForURL(WKWebView *web, NSURL *url) {
+    for (HGStandbyPlayer *candidate in Standbys(web)) {
+        if ([candidate.url isEqual:url]) return candidate;
+    }
+    return nil;
+}
+
+static void StartNextStandby(WKWebView *web) {
+    for (HGStandbyPlayer *candidate in Standbys(web).copy) {
+        if (!candidate.ready) {
+            [candidate tryPreroll];
+            return;
+        }
+    }
+}
+
+static void CancelStandby(WKWebView *web, HGStandbyPlayer *candidate) {
+    if (![Standbys(web) containsObject:candidate]) return;
+    [Standbys(web) removeObjectIdenticalTo:candidate];
+    [candidate.player cancelPendingPrerolls];
+    StartNextStandby(web);
+}
+
+static void CancelAllStandbys(WKWebView *web) {
+    NSArray<HGStandbyPlayer *> *candidates = Standbys(web);
+    objc_setAssociatedObject(web, &standbyKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    for (HGStandbyPlayer *candidate in candidates) [candidate.player cancelPendingPrerolls];
+}
+
+static void ExpireStandby(WKWebView *web, HGStandbyPlayer *standby, NSTimeInterval after) {
+    __weak WKWebView *weakWeb = web;
+    __weak HGStandbyPlayer *weakStandby = standby;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(after * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        WKWebView *currentWeb = weakWeb;
+        HGStandbyPlayer *candidate = weakStandby;
+        if (currentWeb && candidate) CancelStandby(currentWeb, candidate);
+    });
+}
+
+@implementation HGStandbyPlayer
+- (void)tryPreroll {
+    WKWebView *web = self.web;
+    if (!web || ![Standbys(web) containsObject:self]) return;
+    NSNumber *owner = objc_getAssociatedObject(web, &tokenKey);
+    HGPlayerView *active = objc_getAssociatedObject(web, &playerKey);
+    if (!active.wantsPlay || owner.unsignedLongLongValue != self.owner ||
+        active.player.timeControlStatus != AVPlayerTimeControlStatusPlaying ||
+        UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
+    if (!self.player) {
+        AVPlayerItem *item = [AVPlayerItem playerItemWithAsset:self.asset];
+        item.preferredForwardBufferDuration = 2;
+        self.player = [AVPlayer playerWithPlayerItem:item];
+        self.player.muted = YES;
+        [self.player addObserver:self forKeyPath:@"status" options:0 context:&standbyStatusContext];
+        [item addObserver:self forKeyPath:@"status" options:0 context:&standbyStatusContext];
+        self.observing = YES;
+    }
+    if (self.player.status == AVPlayerStatusFailed ||
+        self.player.currentItem.status == AVPlayerItemStatusFailed) {
+        CancelStandby(web, self);
+        return;
+    }
+    // AVPlayer raises if preroll is called before it is ready.
+    if (self.started || self.player.status != AVPlayerStatusReadyToPlay ||
+        self.player.currentItem.status != AVPlayerItemStatusReadyToPlay) return;
+    self.started = YES;
+    __weak HGStandbyPlayer *weakStandby = self;
+    [self.player prerollAtRate:1.0 completionHandler:^(BOOL finished) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            HGStandbyPlayer *standby = weakStandby;
+            WKWebView *currentWeb = standby.web;
+            if (!currentWeb || ![Standbys(currentWeb) containsObject:standby]) return;
+            if (finished) {
+                standby.ready = YES;
+                StartNextStandby(currentWeb);
+            } else {
+                CancelStandby(currentWeb, standby);
+            }
+        });
+    }];
+}
+
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object
+                       change:(NSDictionary<NSKeyValueChangeKey, id> *)change context:(void *)context {
+    if (context != &standbyStatusContext) {
+        [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+        return;
+    }
+    __weak HGStandbyPlayer *weakStandby = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        WKWebView *web = weakStandby.web;
+        if (web) StartNextStandby(web);
+    });
+}
+
+- (void)dealloc {
+    if (self.observing) {
+        [self.player removeObserver:self forKeyPath:@"status" context:&standbyStatusContext];
+        [self.player.currentItem removeObserver:self forKeyPath:@"status" context:&standbyStatusContext];
+    }
+    if (self.backgroundObserver) [NSNotificationCenter.defaultCenter removeObserver:self.backgroundObserver];
+}
+@end
 
 static void ClosePlayer(WKWebView *web) {
     HGPlayerView *view = objc_getAssociatedObject(web, &playerKey);
     if (!view) return;
+    [view stopStartupObservers];
     view.wantsPlay = NO;
     view.seekVersion++;
     [view.player pause];
@@ -186,14 +382,60 @@ void hg_player_preload(void *rawWeb, const char *source, bool local) {
     });
 }
 
-static void SetItem(HGPlayerView *view, NSURL *url, AVURLAsset *warmAsset) {
-    if (view.endObserver) [NSNotificationCenter.defaultCenter removeObserver:view.endObserver];
-    [view.player.currentItem cancelPendingSeeks];
-    view.seekVersion++;
-    view.seeking = NO;
-    view.ended = NO;
-    AVPlayerItem *item = warmAsset ? [AVPlayerItem playerItemWithAsset:warmAsset] : [AVPlayerItem playerItemWithURL:url];
-    [view.player replaceCurrentItemWithPlayerItem:item];
+void hg_player_prepare_standby(void *rawWeb, uint64_t owner, const char *source) {
+    WKWebView *web = (__bridge WKWebView *)rawWeb;
+    HGPlayerView *active = objc_getAssociatedObject(web, &playerKey);
+    NSNumber *activeToken = objc_getAssociatedObject(web, &tokenKey);
+    if (!active.wantsPlay || owner != activeToken.unsignedLongLongValue ||
+        active.player.timeControlStatus != AVPlayerTimeControlStatusPlaying ||
+        UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
+    NSURL *url = PlaybackURL(source, NO);
+    if (!url || ![url.path hasSuffix:@"/master.m3u8"] || [active.sourceURL isEqual:url]) return;
+    NSMutableArray<HGStandbyPlayer *> *candidates = Standbys(web);
+    if (candidates.firstObject && candidates.firstObject.owner != owner) {
+        CancelAllStandbys(web);
+        candidates = nil;
+    }
+    if (StandbyForURL(web, url) || candidates.count >= HGStandbyLimit) return;
+    if (!candidates) {
+        candidates = [NSMutableArray arrayWithCapacity:HGStandbyLimit];
+        objc_setAssociatedObject(web, &standbyKey, candidates, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    NSMutableDictionary<NSURL *, AVURLAsset *> *assets = objc_getAssociatedObject(web, &warmAssetsKey);
+    AVURLAsset *asset = assets[url];
+    AVKeyValueStatus status = [asset statusOfValueForKey:@"playable" error:nil];
+    if (!asset || status == AVKeyValueStatusFailed || status == AVKeyValueStatusCancelled) {
+        asset = [AVURLAsset URLAssetWithURL:url options:nil];
+    }
+    // Do not leave the asset in the metadata cache: eviction there cancels loading.
+    [assets removeObjectForKey:url];
+    HGStandbyPlayer *standby = [HGStandbyPlayer new];
+    standby.web = web;
+    standby.url = url;
+    standby.owner = owner;
+    standby.asset = asset;
+    [candidates addObject:standby];
+    __weak WKWebView *weakWeb = web;
+    __weak HGStandbyPlayer *weakStandby = standby;
+    standby.backgroundObserver = [NSNotificationCenter.defaultCenter
+        addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:NSOperationQueue.mainQueue
+        usingBlock:^(__unused NSNotification *note) {
+            WKWebView *currentWeb = weakWeb;
+            HGStandbyPlayer *candidate = weakStandby;
+            if (currentWeb && candidate && [Standbys(currentWeb) containsObject:candidate])
+                CancelAllStandbys(currentWeb);
+        }];
+    ExpireStandby(web, standby, HGStandbyLifetime);
+    StartNextStandby(web);
+}
+
+static void ObserveItem(HGPlayerView *view, AVPlayerItem *item, BOOL measureStartup) {
+    if (measureStartup) {
+        [item addObserver:view.startupTiming forKeyPath:@"status"
+                  options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew context:&itemReadyContext];
+        view.observedStartupItem = item;
+    }
     __weak HGPlayerView *weakView = view;
     view.endObserver = [NSNotificationCenter.defaultCenter
         addObserverForName:AVPlayerItemDidPlayToEndTimeNotification object:item queue:NSOperationQueue.mainQueue
@@ -203,6 +445,18 @@ static void SetItem(HGPlayerView *view, NSURL *url, AVURLAsset *warmAsset) {
             current.ended = YES;
             current.wantsPlay = NO;
         }];
+}
+
+static void SetItem(HGPlayerView *view, NSURL *url, AVURLAsset *warmAsset, BOOL measureStartup) {
+    [view stopStartupObservers];
+    if (view.endObserver) [NSNotificationCenter.defaultCenter removeObserver:view.endObserver];
+    [view.player.currentItem cancelPendingSeeks];
+    view.seekVersion++;
+    view.seeking = NO;
+    view.ended = NO;
+    AVPlayerItem *item = warmAsset ? [AVPlayerItem playerItemWithAsset:warmAsset] : [AVPlayerItem playerItemWithURL:url];
+    ObserveItem(view, item, measureStartup);
+    [view.player replaceCurrentItemWithPlayerItem:item];
 }
 
 static void Seek(HGPlayerView *view, double target, BOOL resume) {
@@ -231,36 +485,75 @@ static void Seek(HGPlayerView *view, double target, BOOL resume) {
         }];
 }
 
-bool hg_player_open(void *rawWeb, uint64_t token, const char *source, bool local) {
+bool hg_player_open(void *rawWeb, uint64_t token, const char *source, bool local,
+                    HGPlayerOpenTiming *timing) {
     WKWebView *web = (__bridge WKWebView *)rawWeb;
     UIView *parent = web.superview;
     NSNumber *previousToken = objc_getAssociatedObject(web, &tokenKey);
     if (!parent || (previousToken && token <= previousToken.unsignedLongLongValue)) return false;
+    CFTimeInterval started = CACurrentMediaTime();
     ClosePlayer(web);
+    CFTimeInterval attaching = CACurrentMediaTime();
+    timing->close_ms = (attaching - started) * 1000;
     objc_setAssociatedObject(web, &tokenKey, @(token), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     NSURL *url = PlaybackURL(source, local);
     if (!url) return false;
 
     HGPlayerView *view = [[HGPlayerView alloc] initWithFrame:web.frame];
+    view.startupTiming = [HGStartupTiming new];
+    __weak WKWebView *weakWeb = web;
+    __weak HGPlayerView *weakView = view;
+    view.startupTiming.firstFrame = ^{
+        dispatch_async(dispatch_get_main_queue(), ^{
+            WKWebView *target = weakWeb;
+            HGPlayerView *player = weakView;
+            if (!target || !player) return;
+            NSNumber *currentToken = objc_getAssociatedObject(target, &tokenKey);
+            if (currentToken.unsignedLongLongValue != token ||
+                objc_getAssociatedObject(target, &playerKey) != player || !((AVPlayerLayer *)player.layer).readyForDisplay) return;
+            NSString *event = [NSString stringWithFormat:
+                @"window.dispatchEvent(new CustomEvent('hg-ios-first-frame', {detail:%llu}))",
+                (unsigned long long)token];
+            [target evaluateJavaScript:event completionHandler:nil];
+        });
+    };
     view.userInteractionEnabled = NO;
     view.hidden = YES;
     view.backgroundColor = UIColor.blackColor;
     view.sourceURL = url;
-    view.player = [AVPlayer new];
+    HGStandbyPlayer *standby = StandbyForURL(web, url);
+    if (standby.ready &&
+        standby.player.status == AVPlayerStatusReadyToPlay &&
+        standby.player.currentItem.status == AVPlayerItemStatusReadyToPlay &&
+        UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
+        view.player = standby.player;
+        view.player.currentItem.preferredForwardBufferDuration = 0;
+        view.adoptedStandby = YES;
+        [Standbys(web) removeObjectIdenticalTo:standby];
+        ObserveItem(view, view.player.currentItem, YES);
+    } else {
+        view.player = [AVPlayer new];
+    }
+    CancelAllStandbys(web);
     NSMutableDictionary<NSURL *, AVURLAsset *> *assets = objc_getAssociatedObject(web, &warmAssetsKey);
     AVURLAsset *warmAsset = assets[url];
     [assets removeObjectForKey:url];
     if (warmAsset) {
         AVKeyValueStatus status = [warmAsset statusOfValueForKey:@"playable" error:nil];
         if (status == AVKeyValueStatusFailed || status == AVKeyValueStatusCancelled) warmAsset = nil;
+        else view.warmAssetState = status == AVKeyValueStatusLoaded ? 2 : 1;
     }
-    SetItem(view, url, warmAsset);
+    if (!view.adoptedStandby) SetItem(view, url, warmAsset, YES);
     AVPlayerLayer *layer = (AVPlayerLayer *)view.layer;
+    [layer addObserver:view.startupTiming forKeyPath:@"readyForDisplay"
+               options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew context:&layerReadyContext];
+    view.observingStartupLayer = YES;
     layer.player = view.player;
     layer.videoGravity = AVLayerVideoGravityResizeAspect;
     PreparePlaybackHost(web, parent);
     [parent insertSubview:view belowSubview:web];
     objc_setAssociatedObject(web, &playerKey, view, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    timing->attach_ms = (CACurrentMediaTime() - attaching) * 1000;
     return true;
 }
 
@@ -304,6 +597,10 @@ bool hg_player_control(void *rawWeb, uint64_t token, int32_t action, double valu
     WKWebView *web = (__bridge WKWebView *)rawWeb;
     NSNumber *activeToken = objc_getAssociatedObject(web, &tokenKey);
     if (action == HGClose && (!activeToken || token >= activeToken.unsignedLongLongValue)) {
+        // A normal media switch closes the outgoing surface before opening the next.
+        for (HGStandbyPlayer *candidate in Standbys(web)) {
+            if (candidate.owner == token) ExpireStandby(web, candidate, 1.0);
+        }
         ClosePlayer(web);
         objc_setAssociatedObject(web, &tokenKey, @(token), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         return true;
@@ -322,6 +619,7 @@ bool hg_player_control(void *rawWeb, uint64_t token, int32_t action, double valu
             if (!view.seeking) [player play];
             break;
         case HGPause:
+            if (Standbys(web).firstObject.owner == token) CancelAllStandbys(web);
             view.wantsPlay = NO;
             [player pause];
             break;
@@ -338,7 +636,7 @@ bool hg_player_control(void *rawWeb, uint64_t token, int32_t action, double valu
             if (value >= 0) components.queryItems = @[[NSURLQueryItem queryItemWithName:@"level"
                 value:[NSString stringWithFormat:@"%d", (int)value]]];
             [player pause];
-            SetItem(view, components.URL, nil);
+            SetItem(view, components.URL, nil, NO);
             item = player.currentItem;
             if (view.wantsPlay && view.pendingPosition == 0) [player play];
             break;
@@ -381,6 +679,11 @@ bool hg_player_control(void *rawWeb, uint64_t token, int32_t action, double valu
     out->width = size.width;
     out->height = size.height;
     out->ready = ((AVPlayerLayer *)view.layer).readyForDisplay;
+    [view.startupTiming writeToSnapshot:out];
+    out->warm_asset = view.warmAssetState;
+    out->standby_hit = view.adoptedStandby;
+    if (Standbys(web).firstObject.owner == token && player.timeControlStatus == AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate)
+        CancelAllStandbys(web);
     out->app_state = (int32_t)UIApplication.sharedApplication.applicationState;
     if (player.status == AVPlayerStatusFailed || item.status == AVPlayerItemStatusFailed) {
         out->status = -1;

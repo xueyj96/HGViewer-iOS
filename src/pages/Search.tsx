@@ -7,7 +7,7 @@ import { IOSPageBar } from "../components/IOSPageBar";
 import { useIOSBrowseCoverMenu } from "../components/IOSCoverMenu";
 import { IOSSwipeSegments, IOSTabPages, useIOSTabSwipe } from "../components/IOSTabSwipe";
 import { Masonry, RankRow } from "../components/cards";
-import { CompactAction, LoadingStatus, PageStatus } from "../components/ui";
+import { CompactAction, ErrorStatus, LoadingStatus, PageStatus } from "../components/ui";
 import { IBack, IClose, IFireF, IRefresh, ISearch, ITrophy } from "../icons";
 
 const HOT_TAGS = ["都市", "逆袭", "古风", "系统", "后宫", "校园", "仙侠", "职场", "大男主", "御姐", "脑洞", "奇幻"];
@@ -84,7 +84,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
     <form className="hg-ios-search-field min-w-0 flex-1 flex items-center gap-2 h-11 rounded-(--r-ctl) bg-s3 px-3.5 focus-within:bg-s4 transition-colors"
       onSubmit={(e) => { e.preventDefault(); submit(q); if (isIos && q.trim()) inputRef.current?.blur(); }}>
       <ISearch size={17} className="text-mut shrink-0" />
-      <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索短剧、作者、题材…" type="search" enterKeyHint="search"
+      <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索短剧、题材…" type="search" enterKeyHint="search"
         className="flex-1 min-w-0 bg-transparent text-[13.5px] text-on placeholder-dim outline-none" />
       {q && <button type="button" aria-label="清除关键词" onClick={clearQuery}
         onPointerDown={(event) => {
@@ -159,7 +159,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             {items.length ? (
               <>
                 <Masonry videos={items} wide={wide} onOpen={(v) => open(v.id)} />
-                {err && !loading ? <div className="mt-2"><PageStatus title="搜索结果加载失败" onRetry={() => void run(submitted, page + 1)} /></div>
+                {err && !loading ? <div className="mt-2"><ErrorStatus message="搜索结果加载失败" active={active} onRetry={() => void run(submitted, page + 1)} /></div>
                   : (!isIos || loading || page < pages) && <div className="flex justify-center py-4">
                   {loading ? <LoadingStatus variant="tail" label="正在加载更多搜索结果" />
                     : page < pages ? (
@@ -169,7 +169,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
               </>
             ) : loading ? (
               <div className="flex justify-center"><LoadingStatus variant="initial" label="正在搜索" /></div>
-            ) : err ? <PageStatus title="搜索失败" onRetry={() => void run(submitted, 1)} />
+            ) : err ? <ErrorStatus message="搜索失败" active={active} onRetry={() => void run(submitted, 1)} />
               : <PageStatus title="没有找到相关内容" detail="换个关键词试试。" />}
           </>
         )}
@@ -241,7 +241,7 @@ export function RankPage({ onBack, wide, active }: { onBack: () => void; wide: b
           <RankRow key={`${it.video_id}-${it.rank}`} item={it} metricMax={max}
             onOpen={() => open(it.video_id)} />
         ))
-      ) : failed ? <PageStatus title="榜单加载失败" onRetry={() => setRetry((n) => n + 1)} />
+      ) : failed ? <ErrorStatus message="榜单加载失败" active={active && committed} onRetry={() => setRetry((n) => n + 1)} />
         : <PageStatus title="榜单暂时为空" />}
       {wide && <div className="h-2" />}
     </div>;

@@ -166,6 +166,8 @@ pub(super) struct Job {
     transfer_window: Option<TransferWindow>,
     pub message: String,
     pub watch_key: Option<u64>,
+    #[serde(default)]
+    pub finalizing: bool,
     pub needs_fill: bool,
     #[serde(skip)]
     pub resource_retries: u64,
@@ -185,6 +187,8 @@ pub(super) struct Job {
     pub checkpoint_changes: u64,
     #[serde(skip)]
     pub resume_capture_after_stop: bool,
+    #[serde(skip)]
+    pub ready_interrupted: bool,
 }
 
 impl Job {
@@ -213,7 +217,7 @@ impl Job {
 
     fn snapshot(&self) -> Self {
         let mut snapshot = self.clone();
-        if self.running && !self.stopping {
+        if self.running && !self.stopping && !self.finalizing {
             if let Some(window) = &self.transfer_window {
                 let estimate = window.estimate(
                     Instant::now(),
@@ -223,6 +227,11 @@ impl Job {
                 snapshot.network_bytes_per_second = estimate.network_speed;
                 snapshot.episode_eta_seconds = estimate.eta;
             }
+        }
+        if self.finalizing {
+            snapshot.bytes_per_second = None;
+            snapshot.network_bytes_per_second = None;
+            snapshot.episode_eta_seconds = None;
         }
         snapshot
     }
@@ -384,6 +393,48 @@ pub(crate) struct BackgroundSnapshot {
 
 impl Queue {
     #[cfg(any(target_os = "ios", test))]
+    pub fn promote_ready(&mut self, root: &Path, id: i64, ep: u32) -> std::io::Result<()> {
+        let (stopping, interrupted, title) = self
+            .active
+            .get(&id)
+            .map(|job| {
+                let job = job.lock().unwrap();
+                (job.stopping, job.ready_interrupted, job.title.clone())
+            })
+            .unwrap_or_default();
+        if interrupted && !self.pending.entries.iter().any(|entry| entry.id == id) {
+            let mut entry = Entry::new(id, title, Some(BTreeSet::from([ep])), None);
+            entry.paused = self.backgrounded;
+            entry.resume_in_foreground = self.backgrounded;
+            self.pending.entries.push(entry);
+        }
+        let mut changed = interrupted;
+        if let Some(entry) = self
+            .pending
+            .entries
+            .iter_mut()
+            .find(|e| e.id == id && e.capture.is_some())
+        {
+            entry.capture = None;
+            entry.episodes = Some(BTreeSet::from([ep]));
+            if stopping {
+                entry.paused = !interrupted || self.backgrounded;
+                entry.resume_in_foreground = interrupted && self.backgrounded;
+                entry.resume_in_background = false;
+            }
+            changed = true;
+        }
+        if changed {
+            if let Some(job) = self.active.get(&id) {
+                let mut job = job.lock().unwrap();
+                job.watch_key = None;
+                job.needs_fill = false;
+            }
+            self.pending.persist(root).map_err(std::io::Error::other)?;
+        }
+        Ok(())
+    }
+    #[cfg(any(target_os = "ios", test))]
     pub fn interrupt_background(&mut self, root: &Path, recover: bool) -> Result<(), String> {
         self.pending.entries.retain(|entry| entry.capture.is_none());
         self.pause_for_foreground(root, recover)
@@ -421,7 +472,11 @@ impl Queue {
             }
         }
         for job in self.active.values() {
-            job.lock().unwrap().stopping = true;
+            let mut job = job.lock().unwrap();
+            if !job.stopping {
+                job.ready_interrupted = true;
+            }
+            job.stopping = true;
         }
         self.pending.persist(root)
     }
@@ -499,6 +554,7 @@ impl Queue {
                     .saturating_mul(1000)
                     / job.transfer_total
             };
+            let transfer = transfer.min(if job.finalizing { 990 } else { 1000 });
             snapshot.progress += ((job.done as u64 * 1000 + transfer) / job.total as u64).min(1000);
         }
         // A canceled download can still be unwinding and removing its staging directory.
@@ -544,6 +600,7 @@ impl Queue {
             job.resource_retries = 0;
             job.resource_retry_reason = None;
             job.worker_id = super::diagnostics::worker_id();
+            job.ready_interrupted = false;
             job.queued = false;
             let job = Arc::new(Mutex::new(job));
             self.active.insert(entry.id, job.clone());
@@ -567,10 +624,20 @@ impl Queue {
     pub fn finish(
         &mut self,
         root: &Path,
-        entry: Entry,
+        mut entry: Entry,
         mut job: Job,
         result: Result<(), TransferFailure>,
     ) {
+        if entry.capture.is_some()
+            && self
+                .pending
+                .entries
+                .iter()
+                .any(|current| current.id == entry.id && current.capture.is_none())
+        {
+            entry.capture = None;
+            entry.episodes = Some(BTreeSet::from([job.ep]));
+        }
         self.active.remove(&entry.id);
         job.running = false;
         let stopped = job.stopping;
@@ -1111,5 +1178,149 @@ mod tests {
         assert_eq!(reopened.background_snapshot().failed, 1);
         assert_eq!(reopened.reserve().pop().unwrap().0.id, 3);
         std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn complete_capture_is_promoted_before_local_failure_and_survives_restart() {
+        let root = temp_root();
+        let mut queue = Queue::default();
+        let capture = Entry::new(
+            4,
+            "测试".into(),
+            None,
+            Some(Capture {
+                key: 1,
+                fill: false,
+            }),
+        );
+        queue.pending.entries.push(capture);
+        let (original, job) = queue.reserve().pop().unwrap();
+        job.lock().unwrap().ep = 2;
+        queue.promote_ready(&root, 4, 2).unwrap();
+        assert!(queue.pending.entries[0].capture.is_none());
+        assert_eq!(
+            Pending::read(&root).entries[0].episodes,
+            Some(BTreeSet::from([2]))
+        );
+        queue.finish(
+            &root,
+            original,
+            job.lock().unwrap().clone(),
+            Err(TransferFailure::from("合成失败").at("local_remux")),
+        );
+        let persisted = Pending::read(&root);
+        assert_eq!(persisted.entries.len(), 1);
+        assert!(persisted.entries[0].paused);
+        assert!(persisted.entries[0].capture.is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn promoted_capture_completion_consumes_only_the_finished_selection() {
+        let root = temp_root();
+        let mut queue = Queue::default();
+        queue.pending.entries.push(Entry::new(
+            4,
+            "测试".into(),
+            None,
+            Some(Capture {
+                key: 1,
+                fill: false,
+            }),
+        ));
+        let (original, job) = queue.reserve().pop().unwrap();
+        job.lock().unwrap().ep = 2;
+        queue.promote_ready(&root, 4, 2).unwrap();
+        queue.pending.entries[0]
+            .episodes
+            .as_mut()
+            .unwrap()
+            .insert(3);
+        queue.finish(&root, original, job.lock().unwrap().clone(), Ok(()));
+        assert_eq!(
+            queue.pending.entries[0].episodes,
+            Some(BTreeSet::from([2, 3]))
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn ready_promotion_recovers_expiration_and_does_not_restart_manual_stop() {
+        for system in [false, true] {
+            let root = temp_root();
+            let mut queue = Queue::default();
+            queue.pending.entries.push(Entry::new(
+                8,
+                "测试".into(),
+                None,
+                Some(Capture {
+                    key: 3,
+                    fill: false,
+                }),
+            ));
+            let (original, job) = queue.reserve().pop().unwrap();
+            job.lock().unwrap().ep = 1;
+            if system {
+                queue.backgrounded = true;
+                queue.interrupt_background(&root, false).unwrap();
+            } else {
+                let mut job = job.lock().unwrap();
+                job.stopping = true;
+                job.ready_interrupted = false;
+            }
+            queue.promote_ready(&root, 8, 1).unwrap();
+            let current = &queue.pending.entries[0];
+            assert!(current.capture.is_none());
+            assert!(current.paused);
+            assert_eq!(current.resume_in_foreground, system);
+            queue.finish(
+                &root,
+                original,
+                job.lock().unwrap().clone(),
+                Err(TransferFailure::from("stopped")),
+            );
+            assert_eq!(Pending::read(&root).entries.len(), 1);
+            assert!(queue.reserve().is_empty());
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+    #[test]
+    fn expiration_cannot_overwrite_an_earlier_manual_cancel_intent() {
+        for foreground in [false, true] {
+            let root = temp_root();
+            let mut queue = Queue::default();
+            queue.pending.entries.push(entry(8, &[1]));
+            let (_, job) = queue.reserve().pop().unwrap();
+            {
+                let mut j = job.lock().unwrap();
+                j.stopping = true;
+                j.ready_interrupted = false;
+            }
+            queue.pending.entries.clear();
+            queue.backgrounded = true;
+            queue.interrupt_background(&root, false).unwrap();
+            if foreground {
+                queue.backgrounded = false;
+            }
+            queue.promote_ready(&root, 8, 1).unwrap();
+            assert!(!job.lock().unwrap().ready_interrupted);
+            assert!(queue.pending.entries.is_empty());
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+    #[test]
+    fn finalization_is_still_background_work_and_not_download_completion() {
+        let mut queue = Queue::default();
+        queue.pending.entries.push(entry(1, &[1]));
+        let (_, job) = queue.reserve().pop().unwrap();
+        {
+            let mut j = job.lock().unwrap();
+            j.total = 1;
+            j.done = 0;
+            j.transfer_total = 10;
+            j.transfer_done = 10;
+            j.finalizing = true;
+        }
+        let snapshot = queue.background_snapshot();
+        assert_eq!(snapshot.remaining, 1);
+        assert_eq!(snapshot.completed, 0);
+        assert_eq!(snapshot.progress, 990);
     }
 }

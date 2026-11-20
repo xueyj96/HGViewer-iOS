@@ -182,12 +182,34 @@ pub async fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> 
 
 /* ───────────────────────── 会话 ───────────────────────── */
 
+fn authenticated_user(user: &Value) -> Result<Value, String> {
+    if user
+        .get("id")
+        .and_then(Value::as_f64)
+        .is_some_and(|id| id >= 1.0 && id <= 9_007_199_254_740_991.0 && id.fract() == 0.0)
+    {
+        Ok(user.clone())
+    } else {
+        Err("认证返回缺少有效账号，请重试".into())
+    }
+}
+
+fn authenticated_payload(data: &Value) -> Result<(String, Value), String> {
+    let token = data
+        .get("token")
+        .and_then(Value::as_str)
+        .filter(|token| !token.trim().is_empty())
+        .ok_or_else(|| "认证返回缺少有效凭据，请重试".to_string())?;
+    Ok((token.to_string(), authenticated_user(&data["user"])?))
+}
+
 #[tauri::command]
 pub async fn app_boot(state: State<'_, Api>) -> Result<Value, String> {
     let origin = base();
+    let snapshot = state.session.snapshot(&origin);
     Ok(json!({
-        "user": state.session.user(&origin),
-        "logged_in": state.session.token(&origin).is_some(),
+        "user": snapshot.user,
+        "logged_in": snapshot.token.is_some(),
         "base": origin,
         "strict_security": crate::network_policy::strict_security(),
         "cli_relaxed": crate::network_policy::cli_strict_override() == Some(false),
@@ -209,6 +231,7 @@ pub async fn api_login(
     password: String,
 ) -> Result<Value, String> {
     let origin = base();
+    let operation = state.session.begin(&origin);
     let data = edge(
         &origin,
         "POST",
@@ -217,16 +240,13 @@ pub async fn api_login(
         None,
     )
     .await?;
-    let token = data
-        .get("token")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "登录返回缺少 token".to_string())?
-        .to_string();
-    let user = data.get("user").cloned().unwrap_or(Value::Null);
+    let (token, user) = authenticated_payload(&data)?;
     if base() != origin {
         return Err("登录期间线路已变化，请重新登录".into());
     }
-    state.session.set(&origin, token, user.clone());
+    if !operation.commit(&origin, token, user.clone()) {
+        return Err("登录已被后续账号操作替代，请重试".into());
+    }
     Ok(json!({ "user": user }))
 }
 
@@ -238,6 +258,7 @@ pub async fn api_register(
     email: String,
 ) -> Result<Value, String> {
     let origin = base();
+    let operation = state.session.begin(&origin);
     let mut body = json!({
         "username": username,
         "password": password,
@@ -254,45 +275,55 @@ pub async fn api_register(
         None,
     )
     .await?;
-    let token = data
-        .get("token")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "注册返回缺少 token".to_string())?
-        .to_string();
-    let user = data.get("user").cloned().unwrap_or(Value::Null);
+    let (token, user) = authenticated_payload(&data)?;
     if base() != origin {
         return Err("注册期间线路已变化，请重新登录".into());
     }
-    state.session.set(&origin, token, user.clone());
+    if !operation.commit(&origin, token, user.clone()) {
+        return Err("注册已被后续账号操作替代，请重试".into());
+    }
     Ok(json!({ "user": user }))
 }
 
 #[tauri::command]
 pub async fn api_logout(state: State<'_, Api>) -> Result<Value, String> {
     let origin = base();
-    let token = state.session.token(&origin);
+    let snapshot = state.session.take_for_logout(&origin);
     let _ = edge(
         &origin,
         "POST",
         "/api/account/logout",
         None,
-        token.as_deref(),
+        snapshot.token.as_deref(),
     )
     .await;
-    state.session.clear();
     Ok(json!({ "ok": true }))
 }
 
 #[tauri::command]
 pub async fn api_me(state: State<'_, Api>) -> Result<Value, String> {
     let origin = base();
-    let token = state.session.token(&origin);
-    let me = edge(&origin, "GET", "/api/account/me", None, token.as_deref()).await?;
+    let snapshot = state.session.snapshot(&origin);
+    let me = edge(
+        &origin,
+        "GET",
+        "/api/account/me",
+        None,
+        snapshot.token.as_deref(),
+    )
+    .await?;
     if base() != origin {
         return Err("读取账号期间线路已变化".into());
     }
-    if let Some(token) = state.session.token(&origin) {
-        state.session.set(&origin, token, me.clone());
+    let current = if snapshot.token.is_some() {
+        state
+            .session
+            .refresh_user(snapshot.revision, &origin, authenticated_user(&me)?)
+    } else {
+        state.session.is_current(snapshot.revision)
+    };
+    if !current {
+        return Err("读取期间账号状态已变化，请重新读取".into());
     }
     Ok(me)
 }
@@ -312,10 +343,15 @@ pub async fn api_category(
     cate: String,
     page: u32,
     size: u32,
+    sort: Option<String>,
 ) -> Result<Value, String> {
+    let sort = match sort.as_deref() {
+        Some("popular") => "popular",
+        _ => "new",
+    };
     state
         .get(&format!(
-            "/api/videos/category/{cate}?page={page}&size={size}"
+            "/api/videos/category/{cate}?page={page}&size={size}&sort={sort}"
         ))
         .await
 }
@@ -359,6 +395,31 @@ pub async fn api_post(state: State<'_, Api>, id: i64) -> Result<Value, String> {
 #[tauri::command]
 pub async fn api_video(state: State<'_, Api>, id: i64) -> Result<Value, String> {
     state.get(&format!("/api/videos/{id}")).await
+}
+
+#[tauri::command]
+pub async fn api_author(state: State<'_, Api>, id: i64) -> Result<Value, String> {
+    if id <= 0 {
+        return Err("作者 ID 无效".into());
+    }
+    state.get(&format!("/api/users/{id}")).await
+}
+
+#[tauri::command]
+pub async fn api_author_videos(
+    state: State<'_, Api>,
+    id: i64,
+    page: u32,
+    size: u32,
+) -> Result<Value, String> {
+    if id <= 0 {
+        return Err("作者 ID 无效".into());
+    }
+    let page = page.max(1);
+    let size = size.clamp(1, 50);
+    state
+        .get(&format!("/api/videos/user/{id}?page={page}&size={size}"))
+        .await
 }
 
 #[tauri::command]
@@ -467,8 +528,44 @@ pub async fn api_post_comments(
 }
 #[cfg(test)]
 mod tests {
-    use super::is_newer;
-    use serde_json::Value;
+    use super::{authenticated_payload, authenticated_user, is_newer};
+    use serde_json::{json, Value};
+
+    #[test]
+    fn authentication_rejects_empty_credentials_or_invalid_account_before_commit() {
+        let store = crate::session::SessionStore::new();
+        let origin = "https://fixture.invalid";
+        assert!(store
+            .begin(origin)
+            .commit(origin, "accepted-fixture".into(), json!({"id": 1})));
+        for invalid in [
+            json!({"token": "", "user": {"id": 2}}),
+            json!({"token": "  ", "user": {"id": 2}}),
+            json!({"token": "fixture"}),
+            json!({"token": "fixture", "user": null}),
+            json!({"token": "fixture", "user": {"id": 0}}),
+            json!({"token": "fixture", "user": {"id": -1}}),
+            json!({"token": "fixture", "user": {"id": "2"}}),
+            json!({"token": "fixture", "user": {"id": 9_007_199_254_740_992_u64}}),
+        ] {
+            let result: Result<bool, String> = (|| {
+                let operation = store.begin(origin);
+                let (token, user) = authenticated_payload(&invalid)?;
+                Ok(operation.commit(origin, token, user))
+            })();
+            assert!(result.is_err());
+            assert_eq!(store.snapshot(origin).user["id"], 1);
+        }
+        assert!(authenticated_payload(&json!({"token": "fixture", "user": {"id": 2}})).is_ok());
+    }
+
+    #[test]
+    fn account_readback_uses_the_same_user_identity_contract_as_authentication() {
+        assert!(authenticated_user(&json!({"id": 2.0})).is_ok());
+        assert!(authenticated_user(&json!({"id": 0})).is_err());
+        assert!(authenticated_user(&json!({"id": 1.5})).is_err());
+        assert!(authenticated_user(&Value::Null).is_err());
+    }
 
     #[test]
     fn frontend_cannot_bypass_url_policy_with_opener_commands() {

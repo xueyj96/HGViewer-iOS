@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import { appendUniqueById } from "../collections";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, isIos } from "../api";
 import type { Post, VideoCard } from "../types";
 import { useStore, type PageInput } from "../store";
 import { IOSPageBar, IOSRanksButton } from "../components/IOSPageBar";
 import { useIOSBrowseCoverMenu } from "../components/IOSCoverMenu";
 import { IOSSwipeSegments, IOSTabPages, useIOSTabSwipe } from "../components/IOSTabSwipe";
+import { useChannelPages, type ChannelOrder } from "../components/useChannelPages";
 import { Masonry, RowCard } from "../components/cards";
-import { Img, PageStatus } from "../components/ui";
+import { ErrorStatus, Img, PageStatus } from "../components/ui";
 import { IBack, IChevR, IFileText, IGrid, IPlayF, ITrophy } from "../icons";
 
 // Navigation lists only currently available upstream categories.
@@ -69,21 +69,22 @@ function CategoryOverview({ wide }: { wide: boolean }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const entries = await Promise.all(
-        CHANNELS.map(async (c) => {
-          try {
-            const res = await api.category(c.cate, 1, 8);
-            return [c.cate, res?.items || []] as const;
-          } catch {
-            return [c.cate, [] as VideoCard[]] as const;
-          }
-        }),
-      );
-      let p: Post[] = [];
-      try { p = (await api.posts(1, 8))?.items || []; } catch { p = []; }
+      const [entries, postItems] = await Promise.all([
+        Promise.all(
+          CHANNELS.map(async (c) => {
+            try {
+              const res = await api.category(c.cate, 1, 8);
+              return [c.cate, res?.items || []] as const;
+            } catch {
+              return [c.cate, [] as VideoCard[]] as const;
+            }
+          }),
+        ),
+        api.posts(1, 8).then((result) => result?.items || []).catch(() => [] as Post[]),
+      ]);
       if (!alive) return;
       setRows(Object.fromEntries(entries));
-      setPosts(p);
+      setPosts(postItems);
       setLoading(false);
     })();
     return () => { alive = false; };
@@ -117,7 +118,7 @@ function CategoryOverview({ wide }: { wide: boolean }) {
               <button onClick={() => push({ kind: "channel", cate: c.cate, name: c.name })}
                 className="w-full flex items-center gap-2.5 px-4 mb-2.5 text-left pressable group">
                 <span className="w-[36px] h-[36px] rounded-(--r-sm) tonal flex items-center justify-center shrink-0 text-primary">
-                  <IGrid size={19} strokeWidth={1.9} />
+                  <IGrid size={19} />
                 </span>
                 <span className="flex-1 min-w-0">
                   <span className="block text-[15.5px] font-semibold text-on leading-tight">{c.name}</span>
@@ -142,7 +143,7 @@ function CategoryOverview({ wide }: { wide: boolean }) {
           <button onClick={() => push({ kind: "posts" })}
             className="w-full flex items-center gap-2.5 px-4 mb-2.5 text-left pressable group">
             <span className="w-[36px] h-[36px] rounded-(--r-sm) tonal flex items-center justify-center shrink-0 text-primary">
-              <IGrid size={19} strokeWidth={1.9} />
+              <IGrid size={19} />
             </span>
             <span className="flex-1 min-w-0">
               <span className="block text-[15.5px] font-semibold text-on leading-tight">黄果吃瓜</span>
@@ -176,87 +177,68 @@ function CategoryOverview({ wide }: { wide: boolean }) {
 }
 
 /* ================= 频道详情页 ================= */
+const CHANNEL_ORDERS = [{ key: "new", label: "最新" }, { key: "popular", label: "最热" }] as const;
+
 export function ChannelPage({ cate, name, onBack, wide, active }: { cate: string; name: string; onBack: () => void; wide: boolean; active: boolean }) {
   const { push } = useStore();
-  const [sort, setSort] = useState<"最新" | "最热" | "高分">("最新");
-  const sortOptions = ["最新", "最热", "高分"] as const;
-  const sortIndex = sortOptions.indexOf(sort);
-  const tabs = useIOSTabSwipe({ index: sortIndex, count: sortOptions.length, onChange: (index) => setSort(sortOptions[index]), enabled: isIos && active });
-  const [items, setItems] = useState<VideoCard[]>([]);
-  const [page, setPage] = useState(0);
-  const [pages, setPages] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const busy = useRef(false);
+  const [sort, setSort] = useState<ChannelOrder>("new");
+  const sortIndex = CHANNEL_ORDERS.findIndex(option => option.key === sort);
+  const tabs = useIOSTabSwipe({ index: sortIndex, count: CHANNEL_ORDERS.length,
+    onChange: index => setSort(CHANNEL_ORDERS[index].key), enabled: isIos && active });
+  const { snapshots, load } = useChannelPages(cate, sort, active);
+  const { items, page, pages, loading, error: err } = snapshots[sort];
   const sentinel = useRef<HTMLDivElement>(null);
-  const loadMore = async () => {
-    if (busy.current || page >= pages) return;
-    busy.current = true;
-    setLoading(true);
-    try {
-      const next = page + 1;
-      const res = await api.category(cate, next, 20);
-      setItems((previous) => appendUniqueById(previous, res?.items || []));
-      setPage(next);
-      setPages(res?.pagination?.pages || next);
-      setErr(null);
-    } catch (e) {
-      setErr((e as Error).message || "加载失败");
-    } finally {
-      busy.current = false;
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { loadMore(); /* eslint-disable-next-line */ }, []);
-  useEffect(() => {
-    const el = sentinel.current;
-    if (!el || err) return;
-    const io = new IntersectionObserver((es) => { if (es[0].isIntersecting) loadMore(); }, { rootMargin: "600px" });
-    io.observe(el);
-    return () => io.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pages, err, sort]);
-
-  const sorted = [...items].sort((a, b) => {
-    if (sort === "最热") return (b.hot || 0) - (a.hot || 0);
-    if (sort === "高分") return (b.score || 0) - (a.score || 0);
-    return b.id - a.id;
-  });
-
-  const open = (id: number, list = sorted) => {
-    const index = list.findIndex((item) => item.id === id);
-    if (index >= 0) push({ kind: "feed", videoIds: list.map((item) => item.id), index, title: name });
+  const positions = useRef<Record<ChannelOrder, number>>({ new: 0, popular: 0 });
+  const open = (id: number, list = items) => {
+    const index = list.findIndex(item => item.id === id);
+    if (index >= 0) push({ kind: "feed", videoIds: list.map(item => item.id), index, title: name });
   };
   const scroll = useIOSBrowseCoverMenu(active, open, sort);
+  useLayoutEffect(() => {
+    positions.current = { new: 0, popular: 0 };
+    if (scroll.current) scroll.current.scrollTop = 0;
+  }, [cate]);
+  // Initialise both panes before paint. A neighbour is already visible while dragging;
+  // restoring only after selection would jump from its top to its saved position.
+  const paneRefs = useMemo(() => Object.fromEntries(CHANNEL_ORDERS.map(({ key }) => [key,
+    (node: HTMLDivElement | null) => {
+      if (node) node.scrollTop = positions.current[key];
+      if (key === sort) scroll.current = node;
+    },
+  ])) as Record<ChannelOrder, (node: HTMLDivElement | null) => void>, [sort, cate, scroll]);
+  useEffect(() => {
+    if (!active || loading || err || page >= pages || !sentinel.current) return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) void load(sort);
+    }, { root: scroll.current, rootMargin: "600px" });
+    observer.observe(sentinel.current);
+    return () => observer.disconnect();
+  }, [active, loading, page, pages, err, sort, load]);
 
-  const segmentButtons = sortOptions.map((s, index) => (
-        <button key={s} aria-pressed={sortIndex === index} onClick={() => isIos ? tabs.select(index) : setSort(s)}
-          className={`px-4 h-8 rounded-(--r-ctl) text-[12px] font-semibold pressable ${sort === s ? "tonal text-on-sec" : "bg-s3 text-mut"}`}
-          style={sort === s ? { background: "var(--p-sec)", color: "var(--p-primary)" } : undefined}>{s}</button>
+  const segmentButtons = CHANNEL_ORDERS.map(({ key, label }, index) => (
+        <button key={key} aria-pressed={sortIndex === index} onClick={() => isIos ? tabs.select(index) : setSort(key)}
+          className={`px-4 h-8 rounded-(--r-ctl) text-[12px] font-semibold pressable ${sort === key ? "tonal text-on-sec" : "bg-s3 text-mut"}`}
+          style={sort === key ? { background: "var(--p-sec)", color: "var(--p-primary)" } : undefined}>{label}</button>
   ));
   const segments = isIos
     ? <IOSSwipeSegments controller={tabs} label="频道排序">{segmentButtons}</IOSSwipeSegments>
     : <div role="group" aria-label="频道排序" className="hg-ios-segments flex min-w-0 flex-1 gap-2">{segmentButtons}</div>;
 
   const renderPane = (index: number, committed: boolean) => {
-    const paneSort = sortOptions[index];
-    const paneItems = [...items].sort((a, b) => {
-      if (paneSort === "最热") return (b.hot || 0) - (a.hot || 0);
-      if (paneSort === "高分") return (b.score || 0) - (a.score || 0);
-      return b.id - a.id;
-    });
-
-    return <div ref={committed ? scroll : undefined} className="hg-ios-browse-content flex-1 scroll-y px-4 pt-3 pb-8">
+    const order = CHANNEL_ORDERS[index].key;
+    const { items: paneItems, page, pages, loading, error: err } = snapshots[order];
+    const loadMore = () => void load(order);
+    return <div ref={paneRefs[order]} onScroll={committed ? event => { positions.current[order] = event.currentTarget.scrollTop; } : undefined}
+      className="hg-ios-browse-content flex-1 scroll-y px-4 pt-3 pb-8">
       {paneItems.length ? (
-        <Masonry videos={paneItems} wide={wide} onOpen={(v) => { if (committed) open(v.id, paneItems); }} />
+        <Masonry videos={paneItems} wide={wide} layout="grid" onOpen={(v) => { if (committed) open(v.id, paneItems); }} />
       ) : loading || (page === 0 && !err) ? (
         <div className="flex justify-center py-10" role="status" aria-label="正在加载频道">
           <div className="w-8 h-8 spinner" />
         </div>
-      ) : err ? <PageStatus title="频道加载失败" onRetry={loadMore} />
+      ) : err ? <ErrorStatus message="频道加载失败" active={active && committed} onRetry={loadMore} />
         : <PageStatus title="暂无内容" />}
-      {err && paneItems.length > 0 && !loading && <div className="mt-2"><PageStatus title="更多作品加载失败" onRetry={loadMore} /></div>}
+      {err && paneItems.length > 0 && !loading && <div className="mt-2"><ErrorStatus message="更多作品加载失败" active={active && committed} onRetry={loadMore} /></div>}
       {committed && !err && page < pages && <div ref={sentinel} className="h-10" />}
       {loading && paneItems.length > 0 && (
         <div className="flex justify-center py-3" role="status" aria-label="正在加载更多">
@@ -275,7 +257,7 @@ export function ChannelPage({ cate, name, onBack, wide, active }: { cate: string
         <div className="shrink-0 bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
           <div className="px-3 pt-2 pb-3 flex items-center gap-2.5">
             <button onClick={onBack} aria-label="返回" className="hg-ios-back w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></button>
-            <span className="w-[40px] h-[40px] rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center"><IGrid size={21} strokeWidth={1.9} /></span>
+            <span className="w-[40px] h-[40px] rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center"><IGrid size={21} /></span>
             <div className="flex-1 min-w-0">
               <div className="text-[17px] font-bold text-on leading-tight">{name}</div>
               <div className="text-[10.5px] text-mut">共 {items.length} 部 · 已加载 {page}/{Math.max(pages, 1)} 页</div>

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  CommentPage, Detail, Paged, PlayInfo, Post, RankItem, User, VideoCard,
+  Author, AuthorProfile, CommentPage, Detail, Paged, PlayInfo, Post, RankItem, User, VideoCard,
 } from "./types";
 
 /* ── 运行环境 ───────────────────────────────────────────── */
@@ -63,18 +63,20 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 
 /* ── 接口 ───────────────────────────────────────────────── */
 
-export type OfflineEpisode = { id: number; ep: number; title: string; bytes: number; mp4: boolean };
+export type OfflineEpisode = { id: number; ep: number; title: string; bytes: number; mp4: boolean; media_file?: string };
 export type RecentPlayback = { key: number; id: number; ep: number; title: string; bytes: number; needs_fill?: boolean };
 export type OfflineJob = {
   id: number; title: string; cover?: string | null; ep: number; done: number; total: number; message: string;
   transfer_done?: number; transfer_total?: number; bytes_per_second?: number | null; episode_eta_seconds?: number | null;
   network_bytes_per_second?: number | null;
+  finalizing?: boolean;
   running: boolean; queued: boolean; paused: boolean; stopping: boolean; watch_key?: number | null; needs_fill?: boolean;
 };
 export type DownloadSettings = { limit: number; segments: number; allow_background: boolean; background_supported: boolean };
 export type DownloadBackground = "disabled" | "unsupported" | "idle" | "waiting" | "running" | "unavailable" | "expired";
+export type OfflineShow = { episodes: number[]; cover: boolean; author?: Pick<Author, "id" | "name"> };
 export type OfflineState = {
-  items: OfflineEpisode[]; bytes: number; shows: Record<number, { episodes: number[]; cover: boolean }>;
+  items: OfflineEpisode[]; bytes: number; shows: Record<number, OfflineShow>;
   recent: RecentPlayback[];
   jobs: OfflineJob[];
   last?: OfflineJob | null;
@@ -108,8 +110,8 @@ export const api = {
   me: () => call<User>("api_me"),
 
   feed: (page = 1, size = 20) => call<Paged<VideoCard>>("api_feed", { page, size }),
-  category: (cate: string, page = 1, size = 20) =>
-    call<Paged<VideoCard>>("api_category", { cate, page, size }),
+  category: (cate: string, page = 1, size = 20, sort: "new" | "popular" = "new") =>
+    call<Paged<VideoCard>>("api_category", { cate, page, size, sort }),
   rank: (kind: "hot" | "recommend" | "potential") =>
     call<{ type: string; items: RankItem[] }>("api_rank", { kind }),
   search: (q: string, page = 1, size = 20) =>
@@ -120,6 +122,8 @@ export const api = {
   post: (id: number) => call<Post & { content?: string; video_url?: string }>("api_post", { id }),
 
   video: (id: number) => call<Detail>("api_video", { id }),
+  author: (id: number) => call<AuthorProfile>("api_author", { id }),
+  authorVideos: (id: number, page = 1, size = 20) => call<Paged<VideoCard>>("api_author_videos", { id, page, size }),
   play: (id: number, ep: number) => call<PlayInfo>("api_play", { id, ep }),
 
   comments: (id: number, ep: number, page = 1, size = 20) =>
@@ -128,10 +132,11 @@ export const api = {
     call<unknown>("api_comment_send", { id, ep, text, replyId: replyId ?? null }),
 
   watchBegin: (id: number, ep: number, url: string) => call<number | null>("watch_begin", { id, ep, url }),
-  watchDetails: (key: number, title: string, episodes: number[], cover?: string) => call<void>("watch_details", { key, title, episodes, cover: cover ?? null }),
+  watchDetails: (key: number, title: string, episodes: number[], cover?: string, author?: Pick<Author, "id" | "name">) => call<void>("watch_details", { key, title, episodes, cover: cover ?? null, author: author ? { id: author.id, name: author.name } : null }),
   watchSave: (key: number, fill = false) => call<void>("watch_save", { key, fill }),
   watchDiscard: (key: number) => call<void>("watch_discard", { key }),
   offlineRefreshShow: (id: number) => call<void>("offline_refresh_show", { id }),
+  offlineShow: (id: number) => call<OfflineShow | null>("offline_show", { id }),
   offlineEpisode: (id: number, ep: number) => call<OfflineEpisode | null>("offline_episode", { id, ep }),
   offlineStatus: () => call<OfflineState>("offline_status"),
   offlineStart: (id: number, ep?: number, title?: string) => call<void>("offline_start", { id, ep: ep ?? null, title: title ?? null }),
@@ -180,7 +185,7 @@ export type UpdateInfo = {
 
 /* ── 线路（数据源） ─────────────────────────────────────── */
 
-export type LineItem = { name?: string; url: string; host?: string };
+export type LineItem = { name?: string; url: string; host?: string; supports_login?: boolean };
 export type LineState = { base: string; default: string; fixed: LineItem[] };
 export type LineMirrors = { source: string; script?: string; items: LineItem[] };
 export type LineProbe = { url: string; ok: boolean; status?: number; ms: number; error?: string };

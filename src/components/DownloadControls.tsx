@@ -12,6 +12,7 @@ export function CompactDownloadButton({ children, disabled, onClick }: {
 }
 
 export function episodeDownloadPercent(job: OfflineJob | undefined, ep: number) {
+  if (job?.running && !job.stopping && job.finalizing && job.ep === ep) return 99;
   if (!job?.running || job.stopping || job.message || job.ep !== ep || !job.transfer_total) return undefined;
   return Math.min(99, Math.max(0, Math.floor((job.transfer_done ?? 0) * 100 / job.transfer_total)));
 }
@@ -29,12 +30,13 @@ export function EpisodeDownloadLabel({ ep, percent }: {
 
 export function downloadSpeed(job?: OfflineJob) {
   if (!job?.running || job.stopping) return undefined;
+  if (job.finalizing) return "合成中";
   if (job.bytes_per_second == null) return "测速中";
   return formatSpeed(job.bytes_per_second);
 }
 
 export function downloadNetworkSpeed(job?: OfflineJob) {
-  if (!job?.running || job.stopping || job.network_bytes_per_second == null) return undefined;
+  if (!job?.running || job.stopping || job.finalizing || job.network_bytes_per_second == null) return undefined;
   return `网络 ${formatSpeed(job.network_bytes_per_second)}`;
 }
 
@@ -47,6 +49,7 @@ function formatSpeed(bytesPerSecond: number) {
 export function downloadStatus(job: OfflineJob) {
   if (job.stopping) return job.watch_key != null ? "正在停止" : "正在暂停";
   if (job.paused) return "已暂停";
+  if (job.finalizing) return "合成中";
   if (job.queued) return "排队中";
   return "下载中";
 }

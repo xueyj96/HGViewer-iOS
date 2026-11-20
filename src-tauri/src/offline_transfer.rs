@@ -64,12 +64,59 @@ pub(super) enum FailureReason {
     Other,
 }
 
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum RequestPhase {
+    Request,
+    Headers,
+    Body,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(super) struct NetworkFailure {
+    host: Option<String>,
+    host_scope: &'static str,
+    phase: RequestPhase,
+    http_status: Option<u16>,
+}
+
+// Accept only bounded DNS hostnames from a parsed, policy-validated HTTP(S)
+// target. Never derive diagnostics from an error string or retain a URL.
+fn diagnostic_host(target: &url::Url) -> Option<String> {
+    let url::Host::Domain(host) = target.host()? else {
+        return None;
+    };
+    let host = host.strip_suffix('.').unwrap_or(host);
+    if host.is_empty()
+        || host.len() > 253
+        || !host.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label
+                    .as_bytes()
+                    .first()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && label
+                    .as_bytes()
+                    .last()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+    {
+        return None;
+    }
+    Some(host.to_ascii_lowercase())
+}
+
 #[derive(Debug)]
 pub(super) struct TransferFailure {
     pub message: String,
     pub retry_after: Option<Duration>,
     pub reason: FailureReason,
     pub stage: &'static str,
+    pub network: Option<NetworkFailure>,
 }
 
 impl From<&str> for TransferFailure {
@@ -85,6 +132,7 @@ impl From<String> for TransferFailure {
             retry_after: None,
             reason: FailureReason::Other,
             stage: "media",
+            network: None,
         }
     }
 }
@@ -104,6 +152,33 @@ impl TransferFailure {
 
     pub fn at(mut self, stage: &'static str) -> Self {
         self.stage = stage;
+        self
+    }
+
+    fn for_request(mut self, raw: &str) -> Self {
+        self.network = Some(NetworkFailure {
+            host: network_policy::parse_target(raw)
+                .ok()
+                .as_ref()
+                .and_then(diagnostic_host),
+            // get_stream does not expose the last attempted redirect on failure.
+            host_scope: "request",
+            phase: RequestPhase::Request,
+            http_status: None,
+        });
+        self
+    }
+
+    fn for_response(mut self, target: &url::Url, status: u16, phase: RequestPhase) -> Self {
+        self.network = Some(NetworkFailure {
+            host: network_policy::parse_target(target.as_str())
+                .ok()
+                .as_ref()
+                .and_then(diagnostic_host),
+            host_scope: "response",
+            phase,
+            http_status: Some(status),
+        });
         self
     }
 
@@ -153,7 +228,7 @@ impl TransferFailure {
                 _ => None,
             };
         }
-        failure
+        failure.for_response(response.url(), status, RequestPhase::Headers)
     }
 }
 
@@ -223,12 +298,20 @@ async fn download_response(
     retry_transfer(job, || async {
         let mut response = net::get_stream(url, &referer)
             .await
-            .map_err(TransferFailure::connect)?;
+            .map_err(|reason| TransferFailure::connect(reason).for_request(url))?;
         if response.status() != 200 {
             return Err(TransferFailure::status(&response));
         }
+        let response_url = response.url().clone();
+        let status = response.status().as_u16();
+        let body_failure =
+            |error: TransferFailure| error.for_response(&response_url, status, RequestPhase::Body);
         if response.content_length().is_some_and(|len| len > limit) {
-            return Err("媒体分片或清单过大".into());
+            return Err(TransferFailure::from("媒体分片或清单过大").for_response(
+                &response_url,
+                status,
+                RequestPhase::Headers,
+            ));
         }
         let mut data = Vec::new();
         let max_read = Duration::from_secs(if limit == SEG_LIMIT { 180 } else { 20 });
@@ -237,22 +320,26 @@ async fn download_response(
             let chunk = tokio::time::timeout_at(deadline, response.chunk())
                 .await
                 .map_err(|_| {
-                    TransferFailure::transient("媒体下载超时", Duration::ZERO)
-                        .with_reason(FailureReason::Timeout)
+                    body_failure(
+                        TransferFailure::transient("媒体下载超时", Duration::ZERO)
+                            .with_reason(FailureReason::Timeout),
+                    )
                 })?
                 .map_err(|error| {
-                    TransferFailure::transient("媒体下载中断", Duration::ZERO).with_reason(
-                        if error.is_timeout() {
-                            FailureReason::ReadStalled
-                        } else {
-                            FailureReason::BodyInterrupted
-                        },
+                    body_failure(
+                        TransferFailure::transient("媒体下载中断", Duration::ZERO).with_reason(
+                            if error.is_timeout() {
+                                FailureReason::ReadStalled
+                            } else {
+                                FailureReason::BodyInterrupted
+                            },
+                        ),
                     )
                 })?;
             let Some(chunk) = chunk else { break };
             check_job(job)?;
             if data.len() as u64 + chunk.len() as u64 > limit {
-                return Err("媒体分片或清单过大".into());
+                return Err(body_failure("媒体分片或清单过大".into()));
             }
             job.lock().unwrap().record_network_bytes(chunk.len());
             data.extend_from_slice(&chunk);
@@ -297,10 +384,14 @@ async fn save_mp4_attempt(
 ) -> Result<u64, TransferFailure> {
     let mut response = net::get_stream(url, &format!("{origin}/"))
         .await
-        .map_err(TransferFailure::connect)?;
+        .map_err(|reason| TransferFailure::connect(reason).for_request(url))?;
     if response.status() != 200 {
         return Err(TransferFailure::status(&response));
     }
+    let response_url = response.url().clone();
+    let status = response.status().as_u16();
+    let body_failure =
+        |error: TransferFailure| error.for_response(&response_url, status, RequestPhase::Body);
     let mut file = fs::File::create(path)
         .await
         .map_err(TransferFailure::storage)?;
@@ -313,12 +404,16 @@ async fn save_mp4_attempt(
     while let Some(chunk) = tokio::time::timeout(Duration::from_secs(20), response.chunk())
         .await
         .map_err(|_| {
-            TransferFailure::transient("媒体下载超时", Duration::ZERO)
-                .with_reason(FailureReason::Timeout)
+            body_failure(
+                TransferFailure::transient("媒体下载超时", Duration::ZERO)
+                    .with_reason(FailureReason::Timeout),
+            )
         })?
         .map_err(|_| {
-            TransferFailure::transient("媒体下载中断", Duration::ZERO)
-                .with_reason(FailureReason::BodyInterrupted)
+            body_failure(
+                TransferFailure::transient("媒体下载中断", Duration::ZERO)
+                    .with_reason(FailureReason::BodyInterrupted),
+            )
         })?
     {
         check_job(job)?;
@@ -327,8 +422,10 @@ async fn save_mp4_attempt(
             let remaining = 8 - prefix.len();
             prefix.extend_from_slice(&chunk[..remaining.min(chunk.len())]);
             if prefix.len() == 8 && prefix.get(4..8) != Some(b"ftyp") {
-                return Err(TransferFailure::from("视频文件格式异常")
-                    .with_reason(FailureReason::MediaInvalid));
+                return Err(body_failure(
+                    TransferFailure::from("视频文件格式异常")
+                        .with_reason(FailureReason::MediaInvalid),
+                ));
             }
         }
         file.write_all(&chunk)
@@ -340,9 +437,9 @@ async fn save_mp4_attempt(
             .advance_transfer(chunk.len() as u64, chunk.len() as u64, false);
     }
     if prefix.len() < 8 {
-        return Err(
-            TransferFailure::from("视频文件格式异常").with_reason(FailureReason::MediaInvalid)
-        );
+        return Err(body_failure(
+            TransferFailure::from("视频文件格式异常").with_reason(FailureReason::MediaInvalid),
+        ));
     }
     file.flush().await.map_err(TransferFailure::storage)?;
     Ok(bytes)
@@ -1161,6 +1258,146 @@ mod tests {
         Arc,
     };
     use tokio::{io::AsyncReadExt, net::TcpListener, sync::Barrier};
+
+    fn diagnostic_value(error: &TransferFailure) -> serde_json::Value {
+        serde_json::to_value(super::super::diagnostics::Failure::from(error)).unwrap()
+    }
+
+    #[test]
+    fn diagnostic_hosts_are_bounded_validated_hostnames_only() {
+        let longest = format!(
+            "{}.{}.{}.{}",
+            "a".repeat(63),
+            "b".repeat(63),
+            "c".repeat(63),
+            "d".repeat(61)
+        );
+        let url = url::Url::parse(&format!("https://{longest}/")).unwrap();
+        assert_eq!(diagnostic_host(&url).as_deref(), Some(longest.as_str()));
+        for host in [
+            format!("{longest}d"),
+            format!("{}.example.com", "a".repeat(64)),
+            "invalid_host.example.com".into(),
+            "-invalid.example.com".into(),
+            "invalid-.example.com".into(),
+            "invalid..example.com".into(),
+            "example.com..".into(),
+            "198.18.0.1".into(),
+            "[2001:4860:4860::8888]".into(),
+        ] {
+            if let Ok(url) = url::Url::parse(&format!("https://{host}/")) {
+                assert!(diagnostic_host(&url).is_none());
+            }
+        }
+        let normalized = TransferFailure::connect("DNS 解析失败".into())
+            .for_request("https://CDN.Example.com./private?token=fixture#fragment");
+        assert_eq!(
+            diagnostic_value(&normalized)["network"]["host"],
+            "cdn.example.com"
+        );
+        for target in [
+            "https://user:fixture@cdn.example.com/private",
+            "https://cdn.example.com/\nprivate",
+            "ftp://cdn.example.com/private",
+            "https://hg.localhost/private",
+            "cdn.example.com/private?token=fixture",
+        ] {
+            let error = TransferFailure::from(target).for_request(target);
+            let logged = diagnostic_value(&error);
+            assert!(logged["network"]["host"].is_null());
+            assert!(!logged.to_string().contains(target));
+        }
+    }
+
+    #[test]
+    fn diagnostics_use_response_host_status_and_body_phase_after_redirect() {
+        use reqwest::ResponseBuilderExt;
+        let response: reqwest::Response = tauri::http::Response::builder()
+            .status(503)
+            .url(
+                "https://final.example.com/private?key=fixture"
+                    .parse()
+                    .unwrap(),
+            )
+            .body(Vec::<u8>::new())
+            .unwrap()
+            .into();
+        let error = TransferFailure::status(&response).at("hls_asset");
+        let logged = diagnostic_value(&error);
+        assert_eq!(logged["stage"], "hls_asset");
+        assert_eq!(logged["network"]["host"], "final.example.com");
+        assert_eq!(logged["network"]["host_scope"], "response");
+        assert_eq!(logged["network"]["phase"], "headers");
+        assert_eq!(logged["network"]["http_status"], 503);
+        assert_eq!(error.retry_after, Some(Duration::ZERO));
+
+        let interrupted = TransferFailure::transient("untrusted body error", Duration::ZERO)
+            .with_reason(FailureReason::BodyInterrupted)
+            .for_response(response.url(), 200, RequestPhase::Body)
+            .at("mp4");
+        let logged = diagnostic_value(&interrupted);
+        assert_eq!(logged["network"]["host"], "final.example.com");
+        assert_eq!(logged["network"]["phase"], "body");
+        assert_eq!(logged["network"]["http_status"], 200);
+        assert!(!logged.to_string().contains("untrusted body error"));
+        assert!(!logged.to_string().contains("private"));
+        assert!(!logged.to_string().contains("fixture"));
+    }
+
+    #[test]
+    fn worker_failure_and_retry_logs_preserve_only_sanitized_network_context() {
+        let root = std::env::temp_dir().join(format!(
+            "hg-network-diagnostics-{}-{}",
+            std::process::id(),
+            super::super::diagnostics::worker_id()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let mut job = Job::default();
+        job.worker_id = 42;
+        job.title = "private title".into();
+        for (event, reason) in [
+            ("worker_retry", "DNS 解析失败"),
+            ("worker_failed", "请求超时"),
+        ] {
+            let error = TransferFailure::connect(reason.into())
+                .for_request("https://entry.example.com/private?token=fixture")
+                .at("hls_playlist")
+                .with_context("untrusted detail");
+            super::super::diagnostics::worker(
+                &root,
+                event,
+                &job,
+                1,
+                Some(super::super::diagnostics::Failure::from(&error)),
+            );
+        }
+        let log = std::fs::read_to_string(root.join("download-diagnostics.jsonl")).unwrap();
+        for forbidden in [
+            "https://",
+            "/private",
+            "token",
+            "fixture",
+            "untrusted",
+            "private title",
+        ] {
+            assert!(!log.contains(forbidden));
+        }
+        let rows = log
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 2);
+        for row in rows {
+            let network = &row["data"]["failure"]["network"];
+            assert_eq!(row["data"]["worker"], 42);
+            assert_eq!(row["data"]["failure"]["stage"], "hls_playlist");
+            assert_eq!(network["host"], "entry.example.com");
+            assert_eq!(network["host_scope"], "request");
+            assert_eq!(network["phase"], "request");
+            assert!(network["http_status"].is_null());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn checkpoint_digest_reconstructs_the_downloaded_ciphertext() {

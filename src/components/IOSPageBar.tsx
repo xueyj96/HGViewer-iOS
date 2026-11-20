@@ -1,3 +1,4 @@
+import { IOSHeaderButton } from "./IOSHeaderButton";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { IBack, IClose, ITrophy, IUser } from "../icons";
@@ -5,10 +6,10 @@ import { useStore } from "../store";
 import { useIOSNavigation } from "./IOSNavigation";
 
 export function IOSCloseButton({ onClose, label = "关闭" }: { onClose: () => void; label?: string }) {
-  return <button type="button" onClick={onClose} aria-label={label}
+  return <IOSHeaderButton type="button" onClick={onClose} aria-label={label}
     className="hg-ios-floating-button hg-ios-header-square grid size-11 shrink-0 place-items-center rounded-(--r-ctl) text-on pressable">
     <IClose size={16} aria-hidden="true" />
-  </button>;
+  </IOSHeaderButton>;
 }
 
 export function IOSBackButton({ onBack, overMedia = false, label = "返回" }: {
@@ -17,29 +18,29 @@ export function IOSBackButton({ onBack, overMedia = false, label = "返回" }: {
   label?: string;
 }) {
   return (
-    <button type="button" onClick={onBack} aria-label={label}
+    <IOSHeaderButton type="button" onClick={onBack} aria-label={label}
       className={`hg-ios-floating-button hg-ios-header-back grid shrink-0 place-items-center ${overMedia ? "hg-ios-media-top-button pointer-events-auto" : ""}`}>
       <IBack size={16} />
-    </button>
+    </IOSHeaderButton>
   );
 }
 
 export function IOSAccountButton({ overMedia = false }: { overMedia?: boolean }) {
   const { push } = useStore();
   return (
-    <button type="button" onClick={() => push({ kind: "settings" })} aria-label="我的"
+    <IOSHeaderButton type="button" onClick={() => push({ kind: "settings" })} aria-label="我的"
       className={`hg-ios-account grid place-items-center ${overMedia ? "hg-home-account relative size-11" : "hg-ios-header-square hg-ios-floating-button"}`}>
-      <IUser size={20} strokeWidth={1.7} />
-    </button>
+      <IUser size={20} />
+    </IOSHeaderButton>
   );
 }
 
 export function IOSRanksButton({ overMedia = false }: { overMedia?: boolean }) {
   const { push } = useStore();
-  return <button type="button" aria-label="排行榜" onClick={() => push({ kind: "ranks" })}
+  return <IOSHeaderButton type="button" aria-label="排行榜" onClick={() => push({ kind: "ranks" })}
     className={`hg-ios-floating-button hg-ios-header-square hg-ios-ranks-button grid place-items-center ${overMedia ? "hg-ios-media-top-button" : ""}`}>
     <ITrophy size={20} aria-hidden="true" />
-  </button>;
+  </IOSHeaderButton>;
 }
 
 export function IOSPageBar({ label, onBack, children, startAction, endAction, overMedia = false, fillTrailing = false, overlay = false, hidden = false, priority }: {

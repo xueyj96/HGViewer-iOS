@@ -14,6 +14,8 @@ mod media;
 mod net;
 mod network_policy;
 mod offline;
+#[cfg(all(target_os = "ios", feature = "storage-integration"))]
+pub use offline::run_storage_integration;
 mod session;
 mod watch;
 
@@ -84,6 +86,8 @@ pub fn run() {
                     Err(_) => offline_root,
                 };
                 app.state::<offline::Cache>().bind(offline_root);
+                #[cfg(target_os = "ios")]
+                offline::migrate_existing(app.handle());
                 #[cfg(not(target_os = "ios"))]
                 offline::fill_slots(app.handle());
             }
@@ -184,6 +188,8 @@ pub fn run() {
             api::api_category,
             api::api_rank,
             api::api_search,
+            api::api_author,
+            api::api_author_videos,
             api::cache_clear,
             watch::watch_begin,
             watch::watch_details,
@@ -191,6 +197,7 @@ pub fn run() {
             offline::watch_discard,
             offline::offline_status,
             offline::offline_episode,
+            offline::offline_show,
             offline::offline_refresh_show,
             offline::offline_start,
             offline::offline_stop,

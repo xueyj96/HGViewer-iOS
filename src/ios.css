@@ -251,6 +251,8 @@ html.theme-light .plat-ios {
   pointer-events: none !important;
 }
 .plat-ios .hg-ios-nav-ghost * { pointer-events: none !important; }
+.plat-ios .hg-ios-action-content { display: inline-flex; align-items: center; justify-content: center; gap: var(--ios-control-gap); pointer-events: none; }
+.plat-ios .hg-ios-nav-ghost-content :is(.hg-ios-floating-button, .hg-home-account)::before { visibility: hidden; }
 .plat-ios .hg-ios-nav-ghost :is(.hg-ios-floating-button, .hg-home-account, .hg-ios-search-field input) { color: var(--ios-top-ink); }
 /* Playback clear mode hides its material with the live owner, not with a lower page. */
 .plat-ios .win-main:has(.player-root.is-clear:not([inert] *)) .hg-ios-top-bar:has(> .hg-ios-floating-bar-over-media[data-nav-current="true"]) :is(.hg-ios-nav-surface, .hg-ios-nav-ghost),
@@ -959,7 +961,8 @@ html:has(.hg-native-video.is-ready) body,
 }
 
 .plat-ios .hg-ios-page-layer:has(.hg-native-video.is-ready) > div:not(:has(.hg-native-video.is-ready)),
-.plat-ios .player-root:has(.hg-native-video.is-ready) > .blur-3xl {
+.plat-ios .player-root:has(.hg-native-video.is-ready) > .blur-3xl,
+.plat-ios .hg-native-feed-scroll section:has(.hg-native-video.is-ready) > .hg-feed-poster {
   visibility: hidden;
 }
 
@@ -1071,6 +1074,21 @@ html:has(.hg-native-video.is-ready) body,
   height: 14px;
 }
 
+/* Keep the poster unobstructed on short starts. A sustained wait still
+   announces its status, including a stall after the native frame appears. */
+.plat-ios .hg-feed-loading {
+  animation: hg-feed-loading-show 1ms step-end 220ms both;
+}
+
+.plat-ios section[data-has-preview="true"]:not(:has(.hg-native-video.is-ready)) > .hg-feed-loading {
+  animation-delay: 950ms;
+}
+
+@keyframes hg-feed-loading-show {
+  from { visibility: hidden; }
+  to { visibility: visible; }
+}
+
 /* The video fills the screen-sized stage. Safe-area offsets apply to controls only. */
 .plat-ios .hg-feed-video video {
   display: block;
@@ -1142,6 +1160,7 @@ html:has(.hg-native-video.is-ready) body,
 @media (prefers-reduced-motion: reduce) {
   .plat-ios :is(.hg-ios-back-frame, .hg-ios-sheet, .hg-ios-alert) {
     animation-duration: .01ms;
+    transition-duration: .01ms;
   }
 }
 
@@ -1501,7 +1520,7 @@ html:has(.hg-native-video.is-ready) body,
 .plat-ios .hg-loading-tail { padding-block: 16px; }
 .plat-ios .hg-loading-button { padding: 0; }
 .plat-ios .hg-loading-media { padding: 0; }
-.plat-ios .hg-toast-host { padding-inline: 16px; bottom: max(calc(var(--ios-navigation-reserve) + 8px), calc(var(--ios-viewport-bottom-inset, 0px) + 8px)) !important; }
+.hg-toast-host::backdrop { background: transparent; pointer-events: none; }
 .plat-ios .hg-toast { max-width: min(360px, 100%); padding: 8px 12px; gap: 8px; }
 .plat-ios .hg-toast > span { min-width: 0; font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
 

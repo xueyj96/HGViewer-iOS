@@ -8,6 +8,7 @@ import RecentCache from "./pages/RecentCache";
 import Home from "./pages/Home";
 import Search, { RankPage } from "./pages/Search";
 import Category, { ChannelPage } from "./pages/Category";
+import AuthorPage from "./pages/Author";
 import Profile from "./pages/Profile";
 import SettingsPage from "./pages/Settings";
 import Feed from "./components/Feed";
@@ -83,13 +84,14 @@ function StackPage({ page, onBack, wide, top, bottomInset, onArticleFullscreen }
   }, [onArticleFullscreen, page.key]);
   if (page.kind === "feed") {
     return (
-      <Feed videoIds={page.videoIds} startIndex={page.index} title={page.title} kind={page.feedKind || "video"}
+      <Feed routeKey={page.key} videoIds={page.videoIds} startIndex={page.index} title={page.title} kind={page.feedKind || "video"}
         startEp={page.startEp} startTime={page.startTime} offlineItems={page.offlineItems} offlineCoverIds={page.offlineCoverIds}
         mode="context" active={top} bottomInset={bottomInset} onBack={onBack} />
     );
   }
   if (page.kind === "channel") return <ChannelPage cate={page.cate} name={page.name} onBack={onBack} wide={wide} active={top} />;
   if (page.kind === "ranks") return <RankPage onBack={onBack} wide={wide} active={top} />;
+  if (page.kind === "author") return <AuthorPage id={page.id} initialName={page.name} onBack={onBack} wide={wide} active={top} />;
   if (page.kind === "offline") return <OfflinePage wide={wide} active={top} onBack={onBack} id={page.id} title={page.title} episodes={page.episodes} />;
   if (page.kind === "recent-cache") return <RecentCache onBack={onBack} active={top} />;
   if (page.kind === "settings") return <SettingsPage onBack={onBack} wide={wide} />;
@@ -98,7 +100,9 @@ function StackPage({ page, onBack, wide, top, bottomInset, onArticleFullscreen }
   return null;
 }
 
-const IOS_STACK_ACCOUNT_PAGES = new Set<Page["kind"]>(["channel", "ranks", "posts", "offline", "recent-cache"]);
+const IOS_STACK_ACCOUNT_PAGES = new Set<Page["kind"]>(["channel", "ranks", "author", "posts", "offline", "recent-cache"]);
+// A route keeps its navigation identity, but remote content belongs to the current line.
+const LINE_BOUND_PAGES = new Set<Page["kind"]>(["channel", "ranks", "author", "posts", "post"]);
 
 function WorkspaceStack({ wide, bottomInset, account, onArticleFullscreen }: {
   wide: boolean;
@@ -106,12 +110,13 @@ function WorkspaceStack({ wide, bottomInset, account, onArticleFullscreen }: {
   account?: React.ReactNode;
   onArticleFullscreen?: (key: string, full: boolean) => void;
 }) {
-  const { stack, pop } = useStore();
+  const { stack, pop, lineRevision } = useStore();
   return stack.map((page, index) => {
     const top = index === stack.length - 1;
     const playback = page.kind === "feed";
     const article = page.kind === "post";
-    const content = <StackPage page={page} onBack={pop} wide={wide} top={top}
+    const content = <StackPage key={LINE_BOUND_PAGES.has(page.kind) ? lineRevision : undefined}
+      page={page} onBack={pop} wide={wide} top={top}
       bottomInset={!isMobile || (isIos && playback) ? bottomInset : 0}
       onArticleFullscreen={onArticleFullscreen} />;
 
@@ -166,8 +171,9 @@ function WorkspaceTabs({ wide, bottomInset, account }: { wide: boolean; bottomIn
     const visible = tab === key;
     const behindSearch = isIos && key === "home" && tab === "search";
     if (!visible && !behindSearch && !visited.has(key)) return null;
+    // Keep workspace-owned sheets below pages subsequently pushed onto the stack.
     const frame = <div data-workspace-tab={key} inert={!visible || !pageActive}
-      className={visible || behindSearch ? "absolute inset-0" : "absolute inset-0 invisible pointer-events-none"}>
+      className={`absolute inset-0 isolate ${visible || behindSearch ? "" : "invisible pointer-events-none"}`}>
       {isIos && key === "search" ? <IOSChannelBackFrame active={visible && pageActive} onBack={() => setTab("home")}>{content}</IOSChannelBackFrame> : content}
     </div>;
     return isIos ? <IOSNavigationScope active={visible && stack.length === 0} account={key === "home" ? undefined : account}>{frame}</IOSNavigationScope> : frame;
@@ -366,8 +372,8 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, []);
 
-  if (isMobile) {
-    return <MobileShell>{!isIos && <LoginModal />}<ToastHost /></MobileShell>;
-  }
-  return <><DesktopShell /><LoginModal /><ToastHost /></>;
+  return <>
+    {isMobile ? <MobileShell>{!isIos && <LoginModal />}</MobileShell> : <><DesktopShell /><LoginModal /></>}
+    <ToastHost />
+  </>;
 }

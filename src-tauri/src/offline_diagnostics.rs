@@ -25,6 +25,7 @@ pub(super) struct Failure {
     reason: FailureReason,
     stage: &'static str,
     retryable: bool,
+    network: Option<super::transfer::NetworkFailure>,
 }
 
 impl From<&TransferFailure> for Failure {
@@ -33,6 +34,7 @@ impl From<&TransferFailure> for Failure {
             reason: error.reason,
             stage: error.stage,
             retryable: error.retry_after.is_some(),
+            network: error.network.clone(),
         }
     }
 }

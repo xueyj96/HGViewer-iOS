@@ -61,7 +61,7 @@ export default function PlayerControls({
         </button>
         {onNext && (
           <button className="player-control" aria-label={nextTitle} data-tooltip={nextTitle} disabled={nextDisabled} onClick={onNext}>
-            <INext size={18} strokeWidth={1.7} />
+            <INext size={18} />
           </button>
         )}
         <span className="player-timecode"><span>{clock(time)}</span><span className="player-time-separator">/</span>{clock(duration)}</span>
@@ -84,7 +84,7 @@ export default function PlayerControls({
         </div>
         <div className="player-volume">
           <button className="player-control" aria-label={muted ? "取消静音" : "静音"} aria-pressed={muted} data-tooltip={muted ? "取消静音 M" : "静音 M"} onClick={onMute}>
-            {muted || volume === 0 ? <IVolMute size={20} strokeWidth={1.6} /> : <IVol size={20} strokeWidth={1.6} />}
+            {muted || volume === 0 ? <IVolMute size={20} /> : <IVol size={20} />}
           </button>
           <div className="player-volume-slider">
             <input aria-label="音量" type="range" min={0} max={1} step={0.01} value={muted ? 0 : volume}
@@ -92,13 +92,13 @@ export default function PlayerControls({
               onChange={(e) => onVolume(Number(e.target.value))} />
           </div>
         </div>
-        <button className="player-control" aria-label="画中画" data-tooltip="画中画" onClick={onPip}><IPip size={20} strokeWidth={1.6} /></button>
+        <button className="player-control" aria-label="画中画" data-tooltip="画中画" onClick={onPip}><IPip size={20} /></button>
         {!fullscreen && onTheater && (
           <button className={`player-control ${theater ? "is-on" : ""}`} aria-label="影院模式" aria-pressed={theater}
-            data-tooltip="影院模式 T" onClick={onTheater}><ITheater size={20} strokeWidth={1.6} /></button>
+            data-tooltip="影院模式 T" onClick={onTheater}><ITheater size={20} /></button>
         )}
         <button className="player-control" aria-label={fullscreen ? "退出全屏" : "全屏"} data-tooltip={fullscreen ? "退出全屏 Esc" : "全屏 F"} onClick={onFullscreen}>
-          {fullscreen ? <ICompress size={19} strokeWidth={1.6} /> : <IExpand size={19} strokeWidth={1.6} />}
+          {fullscreen ? <ICompress size={19} /> : <IExpand size={19} />}
         </button>
       </div>
     </div>

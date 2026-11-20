@@ -1,9 +1,11 @@
+import { IOSHeaderButton } from "./IOSHeaderButton";
 import { useEffect, useState } from "react";
 import { api, hostOf, isIos, isMobile, type LineItem, type LineProbe, type LineState } from "../api";
 import { useStore } from "../store";
-import { CompactAction, Modal, PageStatus, Sheet } from "./ui";
+import { CompactAction, ErrorStatus, Modal, Sheet } from "./ui";
 import { IOSPageBar } from "./IOSPageBar";
 import { IBoltF, ICheck, IClose, IRefresh, ISettings } from "../icons";
+import { useToastFeedback } from "./useToastFeedback";
 
 type ProbeMap = Record<string, LineProbe>;
 
@@ -17,6 +19,7 @@ function Row({ item, current, probe, busy, disabled, onPick, onProbe }: {
       <button onClick={() => onPick(item.url)} disabled={disabled} className="min-h-11 flex-1 min-w-0 text-left pressable disabled:opacity-60">
         <div className="flex items-center gap-1.5 text-[13px] leading-5 text-on">
           <span className="truncate">{item.name || item.host || hostOf(item.url)}</span>
+          {item.supports_login === false && <span className="text-[10px] text-dim shrink-0">游客</span>}
           {current && <ICheck size={13} className="text-mint shrink-0" />}
         </div>
         <div className="text-[11px] leading-4 text-mut truncate mt-0.5">{item.url}</div>
@@ -44,6 +47,8 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
   const [probing, setProbing] = useState("");
   const [suggested, setSuggested] = useState<LineProbe | null>(null);
   const [switching, setSwitching] = useState("");
+  useToastFeedback(stateFailed ? "固定线路读取失败" : "", open);
+  useToastFeedback(mirrorErr && mirrorErr !== "镜像线路获取失败" ? `镜像线路获取失败：${mirrorErr}` : mirrorErr, open);
 
   const readState = async () => {
     setStateLoading(true);
@@ -129,10 +134,10 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
   const body = (
     <div className="hg-ios-line-page flex flex-col min-h-0" style={isIos ? { height: "100%" } : { maxHeight: isMobile ? "74vh" : "min(72vh, 620px)" }}>
       {isIos && <IOSPageBar label="线路" overlay hidden={!open} onBack={onClose} endAction={
-        <button type="button" aria-label="查找可用线路" onClick={quickProbe} disabled={busyAll || loadingMirrors || !fixed.length}
+        <IOSHeaderButton type="button" aria-label="查找可用线路" onClick={quickProbe} disabled={busyAll || loadingMirrors || !fixed.length}
           className="hg-ios-floating-button hg-ios-header-square grid place-items-center disabled:opacity-50">
           <IBoltF size={16} />
-        </button>
+        </IOSHeaderButton>
       }>
         <h1 className="min-w-0 flex-1 truncate text-center text-[13px] font-semibold">线路</h1>
       </IOSPageBar>}
@@ -160,12 +165,12 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
         )}
         <div className="flex items-center gap-2 px-1 mt-1 mb-1.5">
           <span className="text-[10.5px] font-semibold text-dim tracking-wide">固定线路</span>
-          <span className="text-[10px] text-dim">需代理 / 非大陆网络</span>
+          <span className="text-[10px] text-dim">可检测后切换</span>
           <CompactAction onClick={() => probe(fixed, "fixed")} disabled={busyAll || !fixed.length} className="ml-auto">
             {probing === "fixed" ? "检测中…" : "全部检测"}
           </CompactAction>
         </div>
-        {stateFailed && <div className="mb-2"><PageStatus title="固定线路读取失败" onRetry={() => void readState()} /></div>}
+        {stateFailed && <div className="mb-2"><ErrorStatus message="固定线路读取失败" notify={false} onRetry={() => void readState()} /></div>}
         <div className="hg-ios-grouped-list rounded-(--r-md) bg-s2 divide-y divide-s3 overflow-hidden">
           {fixed.map((it) => (
             <Row key={it.url} item={it} current={state?.base === it.url} probe={probes[it.url]}
@@ -184,10 +189,7 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
         <div className="hg-ios-grouped-list rounded-(--r-md) bg-s2 divide-y divide-s3 overflow-hidden">
           {loadingMirrors && <div className="flex justify-center py-6"><div className="w-6 h-6 spinner" /></div>}
           {!loadingMirrors && mirrorErr && (
-            <div className="px-3.5 py-3">
-              <div className="text-[11.5px] text-danger">镜像线路获取失败</div>
-              <div className="text-[10.5px] text-mut mt-1 break-all">{mirrorErr}</div>
-            </div>
+            <ErrorStatus message={mirrorErr} notify={false} onRetry={() => void readMirrors()} />
           )}
           {!loadingMirrors && !mirrorErr && mirrors?.length === 0 && (
             <div className="px-3.5 py-3 text-[11px] text-mut">地址发布页里没有可用的镜像地址</div>

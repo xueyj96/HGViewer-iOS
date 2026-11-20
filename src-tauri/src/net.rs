@@ -595,7 +595,7 @@ async fn edge_request(
             ))
         && !trusted_auth_origin(&cur)
     {
-        return Err("镜像线路仅供游客浏览；登录/注册请切换到固定线路".into());
+        return Err("当前线路仅供游客浏览；登录/注册请切换到 huangguoai.com".into());
     }
     let (encoded, ctype) = match &body {
         Some(v) => (
@@ -692,7 +692,7 @@ async fn edge_request(
 /// Raw passthrough also serves progressive MP4 on desktop. Keep its existing
 /// whole-body behavior separate from bounded image/HLS requests.
 pub async fn fetch_bytes(url: &str) -> Result<(Option<String>, Vec<u8>), String> {
-    let (kind, bytes, _, _) = fetch_media(url, &base(), None).await?;
+    let (kind, bytes, _, _) = fetch_media(url, &base(), None, None).await?;
     Ok((kind, bytes))
 }
 
@@ -710,16 +710,127 @@ const MEDIA_REQUEST_LIMIT: usize = 4;
 static MEDIA_REQUESTS: tokio::sync::Semaphore =
     tokio::sync::Semaphore::const_new(MEDIA_REQUEST_LIMIT);
 
+#[derive(Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MediaFetchTiming {
+    queue_ms: u128,
+    attempts: u32,
+    response_headers_ms: Option<u128>,
+    first_body_byte_ms: Option<u128>,
+    remaining_body_ms: Option<u128>,
+}
+
+#[cfg(target_os = "ios")]
+pub(crate) struct OpenedMediaStream {
+    pub response: reqwest::Response,
+    pub first: Option<bytes::Bytes>,
+    pub buffered: Option<Vec<u8>>,
+    pub permit: tokio::sync::SemaphorePermit<'static>,
+    pub timing: MediaFetchTiming,
+}
+
+#[cfg(target_os = "ios")]
+pub(crate) async fn open_media_stream(
+    url: &str,
+    origin: &str,
+    limit: usize,
+    needs_first_chunk: impl Fn(&reqwest::Response) -> bool + Sync,
+) -> Result<OpenedMediaStream, String> {
+    let queued_at = Instant::now();
+    let permit = MEDIA_REQUESTS
+        .acquire()
+        .await
+        .map_err(|_| "媒体请求已停止")?;
+    let queue_ms = queued_at.elapsed().as_millis();
+    let referer = format!("{origin}/");
+    let mut attempts = 0;
+    let (response, first, buffered, mut timing) = with_retry(true, || {
+        attempts += 1;
+        let referer = &referer;
+        let needs_first_chunk = &needs_first_chunk;
+        async move {
+            let started = Instant::now();
+            let mut response = get(url, Duration::from_secs(20), None, Some(referer)).await?;
+            if !response.status().is_success() {
+                return Err(format!("HTTP {}", response.status()));
+            }
+            let headers_at = Instant::now();
+            let mut timing = MediaFetchTiming {
+                response_headers_ms: Some(headers_at.duration_since(started).as_millis()),
+                ..Default::default()
+            };
+            let (first, buffered) = if needs_first_chunk(&response) {
+                // Keep startup failures inside the retry budget until data can
+                // actually be delivered. Never retry a partially sent response.
+                let chunk = response
+                    .chunk()
+                    .await
+                    .map_err(|error| err_text(&error))?
+                    .filter(|chunk| !chunk.is_empty())
+                    .ok_or("分片未返回正文")?;
+                timing.received_first_body_byte(headers_at.elapsed());
+                (Some(chunk), None)
+            } else {
+                match read_media_body(&mut response, Some(limit), Some(&mut timing)).await {
+                    Ok(bytes) => (None, Some(bytes)),
+                    Err(MediaBodyError::TooLarge) => {
+                        return Ok(Err(String::from("媒体响应超过大小限制")))
+                    }
+                    Err(MediaBodyError::Transport(error)) => return Err(error),
+                }
+            };
+            Ok(Ok((response, first, buffered, timing)))
+        }
+    })
+    .await??;
+    timing.queue_ms = queue_ms;
+    timing.attempts = attempts;
+    Ok(OpenedMediaStream {
+        response,
+        first,
+        buffered,
+        permit,
+        timing,
+    })
+}
+
+#[cfg(any(target_os = "ios", test))]
+impl MediaFetchTiming {
+    pub(crate) fn received_first_body_byte(&mut self, after_headers: Duration) {
+        self.first_body_byte_ms = Some(after_headers.as_millis());
+    }
+}
+
 pub async fn fetch_media_bounded(
     url: &str,
     origin: &str,
     limit: usize,
 ) -> Result<(Option<String>, Vec<u8>, url::Url, bool), String> {
+    fetch_media_bounded_with_timing(url, origin, limit, None).await
+}
+
+pub(crate) async fn fetch_media_bounded_with_timing(
+    url: &str,
+    origin: &str,
+    limit: usize,
+    timing: Option<&mut MediaFetchTiming>,
+) -> Result<(Option<String>, Vec<u8>, url::Url, bool), String> {
+    let queued_at = timing.as_ref().map(|_| Instant::now());
     let _permit = MEDIA_REQUESTS
         .acquire()
         .await
         .map_err(|_| "媒体请求已停止")?;
-    fetch_media(url, origin, Some(limit)).await
+    let metrics = queued_at.map(|start| {
+        Mutex::new(MediaFetchTiming {
+            queue_ms: start.elapsed().as_millis(),
+            ..Default::default()
+        })
+    });
+    let result = fetch_media(url, origin, Some(limit), metrics.as_ref()).await;
+    if let (Some(timing), Some(metrics)) = (timing, metrics) {
+        *timing = metrics.into_inner().unwrap();
+    }
+    result
 }
 
 #[derive(Debug, PartialEq)]
@@ -729,8 +840,9 @@ enum MediaBodyError {
 }
 
 async fn read_media_body(
-    mut response: reqwest::Response,
+    response: &mut reqwest::Response,
     limit: Option<usize>,
+    timing: Option<&mut MediaFetchTiming>,
 ) -> Result<Vec<u8>, MediaBodyError> {
     if limit.is_some_and(|limit| {
         response
@@ -741,6 +853,8 @@ async fn read_media_body(
     }
     let initial = response.content_length().unwrap_or(0).min(64 * 1024) as usize;
     let mut bytes = Vec::with_capacity(initial);
+    let body_start = timing.as_ref().map(|_| Instant::now());
+    let mut first_byte = None;
     while let Some(chunk) = response
         .chunk()
         .await
@@ -753,7 +867,14 @@ async fn read_media_body(
             // Avoid Vec's geometric growth reserving beyond the body budget.
             bytes.reserve_exact(chunk.len());
         }
+        if body_start.is_some() && first_byte.is_none() && !chunk.is_empty() {
+            first_byte = Some(Instant::now());
+        }
         bytes.extend_from_slice(&chunk);
+    }
+    if let (Some(timing), Some(start), Some(first)) = (timing, body_start, first_byte) {
+        timing.first_body_byte_ms = Some(first.duration_since(start).as_millis());
+        timing.remaining_body_ms = Some(first.elapsed().as_millis());
     }
     Ok(bytes)
 }
@@ -762,6 +883,7 @@ async fn fetch_media(
     url: &str,
     origin: &str,
     limit: Option<usize>,
+    timing: Option<&Mutex<MediaFetchTiming>>,
 ) -> Result<(Option<String>, Vec<u8>, url::Url, bool), String> {
     let url = url.to_string();
     let referer = format!("{origin}/");
@@ -769,7 +891,11 @@ async fn fetch_media(
         let url = url.clone();
         let referer = referer.clone();
         async move {
-            let resp = get(&url, Duration::from_secs(20), None, Some(&referer)).await?;
+            let started = timing.map(|timing| {
+                timing.lock().unwrap().attempts += 1;
+                Instant::now()
+            });
+            let mut resp = get(&url, Duration::from_secs(20), None, Some(&referer)).await?;
             if !resp.status().is_success() {
                 return Err(format!("HTTP {}", resp.status()));
             }
@@ -781,8 +907,20 @@ async fn fetch_media(
             let complete = resp.status() == 200
                 && !resp.headers().contains_key(reqwest::header::CONTENT_RANGE);
             let final_url = resp.url().clone();
-            match read_media_body(resp, limit).await {
-                Ok(bytes) => Ok(Ok((ctype, bytes, final_url, complete))),
+            let mut attempt = started.map(|start| MediaFetchTiming {
+                response_headers_ms: Some(start.elapsed().as_millis()),
+                ..Default::default()
+            });
+            match read_media_body(&mut resp, limit, attempt.as_mut()).await {
+                Ok(bytes) => {
+                    if let (Some(timing), Some(attempt)) = (timing, attempt) {
+                        let mut timing = timing.lock().unwrap();
+                        timing.response_headers_ms = attempt.response_headers_ms;
+                        timing.first_body_byte_ms = attempt.first_body_byte_ms;
+                        timing.remaining_body_ms = attempt.remaining_body_ms;
+                    }
+                    Ok(Ok((ctype, bytes, final_url, complete)))
+                }
                 // An oversized entity will not shrink on a network retry.
                 Err(MediaBodyError::TooLarge) => Ok(Err("媒体响应超过大小限制".into())),
                 Err(MediaBodyError::Transport(error)) => Err(error),
@@ -811,7 +949,7 @@ mod tests {
                 socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
                 socket.write_all(body).await.unwrap();
             });
-            let response = reqwest::Client::builder()
+            let mut response = reqwest::Client::builder()
                 .no_proxy()
                 .build()
                 .unwrap()
@@ -819,7 +957,7 @@ mod tests {
                 .send()
                 .await
                 .unwrap();
-            let result = read_media_body(response, Some(5)).await;
+            let result = read_media_body(&mut response, Some(5), None).await;
             if length > 5 {
                 // The declared body is absent: reading it would be a transport
                 // error, so TooLarge proves rejection before body reading.
@@ -846,7 +984,7 @@ mod tests {
                 socket.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n").await.unwrap();
             });
             // Direct local fixture client avoids changing the global URL guard.
-            let response = reqwest::Client::builder()
+            let mut response = reqwest::Client::builder()
                 .no_proxy()
                 .build()
                 .unwrap()
@@ -855,13 +993,55 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(response.content_length(), None);
-            let result = read_media_body(response, Some(limit)).await;
+            let result = read_media_body(&mut response, Some(limit), None).await;
             match expected {
                 Some(bytes) => assert_eq!(result.unwrap(), bytes),
                 None => assert_eq!(result.unwrap_err(), MediaBodyError::TooLarge),
             }
             server.await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn media_timing_distinguishes_first_body_bytes_from_remaining_transfer() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (start, headers_received) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                request.push(socket.read_u8().await.unwrap());
+            }
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            headers_received.await.unwrap();
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            socket.write_all(b"abc").await.unwrap();
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            socket.write_all(b"def").await.unwrap();
+        });
+        let mut response = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(url)
+            .send()
+            .await
+            .unwrap();
+        let mut timing = MediaFetchTiming::default();
+        start.send(()).unwrap();
+        let body = read_media_body(&mut response, Some(6), Some(&mut timing))
+            .await
+            .unwrap();
+        assert_eq!(body, b"abcdef");
+        assert!(timing.first_body_byte_ms.unwrap() >= 20);
+        assert!(timing.remaining_body_ms.unwrap() >= 40);
+        server.await.unwrap();
     }
 
     #[tokio::test]
@@ -1048,7 +1228,7 @@ mod tests {
             let err = edge("https://mirror.invalid", "POST", path, body, token)
                 .await
                 .unwrap_err();
-            assert!(err.contains("镜像线路仅供游客浏览"));
+            assert!(err.contains("当前线路仅供游客浏览"));
         }
     }
 

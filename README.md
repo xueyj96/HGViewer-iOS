@@ -29,3 +29,8 @@ Release 中的 `unsigned.ipa` 不含开发者签名或设备描述文件，需�
 ## 许可证
 
 本项目适用 [PolyForm Noncommercial License 1.0.0](LICENSE)，保留 HGhub 贡献者的版权声明，仅限非商业用途。第三方内容和服务适用各自的授权条款。
+
+## 开发文档
+
+- [工程架构](ARCHITECTURE.md)
+- [iOS 播放设计](docs/ios-playback-design.md)

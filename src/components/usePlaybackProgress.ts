@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
-type Resume = { key: string; t: number };
+type Resume = { key: string; t: number; recovery?: boolean };
 type Options = {
   id: number; ep: number; active: boolean; attempt: string;
   initialResume: Resume | null;
@@ -51,6 +51,10 @@ export function usePlaybackProgress({ id, ep, active, attempt, initialResume, re
 
   return {
     time, duration, setTime,
+    prepareRecovery(t: number) {
+      if (!valid() || !Number.isFinite(t) || t < 0) return;
+      pending.current = { key, t, recovery: true };
+    },
     onTime(t: number) {
       if (!valid()) return;
       session.t = t; session.known = true; session.dirty = session.playing;
@@ -66,11 +70,12 @@ export function usePlaybackProgress({ id, ep, active, attempt, initialResume, re
       if (!valid()) return;
       session.dur = d; session.known = true; setDuration(d);
       const resume = pending.current;
-      if (resume?.key === key && resume.t > 1 && (!d || resume.t < d - 3)) {
+      if (resume?.key === key && (resume.recovery || resume.t > 1 && (!d || resume.t < d - 3))) {
         pending.current = null;
-        session.t = resume.t; session.dirty = false;
-        seek(resume.t);
-        setTime(resume.t);
+        const target = resume.recovery && d > 0 ? Math.min(resume.t, Math.max(0, d - .05)) : resume.t;
+        session.t = target; session.dirty = false;
+        seek(target);
+        setTime(target);
       }
     },
     onPlaying() {

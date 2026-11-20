@@ -1,8 +1,10 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useIOSPageDrag } from "./IOSChannelBackFrame";
-import { finishMotion } from "./finishMotion";
+import { useMotionPresence } from "./useMotionPresence";
 import { cover, isIos } from "../api";
-import { useStore } from "../store";
+import { useToasts } from "../toasts";
+import { createPortal } from "react-dom";
+import { useToastFeedback } from "./useToastFeedback";
 import { ICheck, IClose, IHeartF, ISparkF, IStarF } from "../icons";
 
 export function CompactAction({ children, onClick, disabled, tone = "accent", className = "" }: {
@@ -34,6 +36,14 @@ export function PageStatus({ title, detail, onRetry }: { title: string; detail?:
   </div>;
 }
 
+/** The failure remains retryable after its transient message has disappeared. */
+export function ErrorStatus({ message, onRetry, active = true, notify = true }: { message: string; onRetry?: () => void; active?: boolean; notify?: boolean }) {
+  useToastFeedback(notify ? message : "", active);
+  return <div className="hg-page-retry flex min-h-11 items-center justify-center" role="group" aria-label={message}>
+    {onRetry && <CompactAction tone="neutral" onClick={onRetry}>重试</CompactAction>}
+  </div>;
+}
+
 export function LoadingStatus({ variant = "initial", label = "正在加载" }: {
   variant?: "initial" | "tail" | "button" | "media";
   label?: string;
@@ -47,10 +57,9 @@ export function LoadingStatus({ variant = "initial", label = "正在加载" }: {
 export function PlaybackError({ message, title = "视频暂时无法加载", onRetry, retrying }: {
   message?: string; title?: string; onRetry?: () => void; retrying?: boolean;
 }) {
+  useToastFeedback(message && message !== title ? `${title}：${message}` : title);
   return <div className="hg-ios-feed-error pointer-events-none absolute inset-0 z-20 grid place-items-center px-4">
-    <div className="pointer-events-auto flex max-w-full flex-col items-center gap-2 rounded-(--r-md) bg-black/70 px-4 py-3 text-center text-white" role="status">
-      <p className="text-[13px] font-semibold">{title}</p>
-      {message && <p className="max-w-[240px] text-xs text-white/75 [overflow-wrap:anywhere]">{message}</p>}
+    <div className="pointer-events-auto flex max-w-full flex-col items-center gap-2 rounded-(--r-md) bg-black/70 px-4 py-3 text-center text-white" role="group" aria-label={title}>
       {onRetry && <button type="button" disabled={retrying}
         className="min-h-11 min-w-11 rounded-(--r-ctl) bg-white/15 px-3 text-xs font-semibold text-white pressable disabled:opacity-60"
         onClick={onRetry}>{retrying ? "加载中…" : "重试"}</button>}
@@ -93,9 +102,10 @@ export function ConfirmAction({ message, error, ...props }: {
   busy?: boolean; disabled?: boolean; error?: string; onCancel: () => void; onConfirm: () => void;
 }) {
   const messageId = useId();
+  useToastFeedback(error, props.open);
   return <ActionDialog {...props} danger={props.danger ?? true} role="alertdialog" describedBy={messageId}>
-    <p id={messageId} role={error ? "alert" : undefined} aria-label={error || message}
-      className="line-clamp-3">{confirmationText(error || message, CONFIRM_TEXT_LIMITS.message)}</p>
+    <p id={messageId} aria-label={message}
+      className="line-clamp-3">{confirmationText(message, CONFIRM_TEXT_LIMITS.message)}</p>
   </ActionDialog>;
 }
 
@@ -131,6 +141,7 @@ function useDialogFocus(ref: React.RefObject<HTMLDivElement | null>, enabled: bo
     for (let layer = panel.parentElement; layer && layer !== scope; layer = layer.parentElement) {
       for (const sibling of layer.parentElement?.children ?? []) {
         if (sibling !== layer && sibling instanceof HTMLElement && !sibling.inert
+            && !sibling.matches(".hg-toast-host")
             && !(sharedChrome && sibling.matches(".hg-ios-navigation"))) {
           sibling.inert = true;
           covered.push(sibling);
@@ -162,25 +173,18 @@ export function Sheet({ open, onClose, children, z = "z-40", fullPage, label = f
   open: boolean; onClose: () => void; children: React.ReactNode; z?: string; fullPage?: string; label?: string; sharedChrome?: boolean;
   onPresenceChange?: (present: boolean) => void; initialFocus?: "panel" | "first-control";
 }) {
-  const [render, setRender] = useState(open);
   const [dragDismissed, setDragDismissed] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
+  const render = useMotionPresence(open, pageRef);
   const gesture = useIOSPageDrag(pageRef, isIos && open && !!fullPage, () => {
     setDragDismissed(true);
     onClose();
   });
   useEffect(() => {
     if (open) {
-      setRender(true);
       setDragDismissed(false);
-      return;
     }
-    if (isIos && onPresenceChange) {
-      return finishMotion(pageRef.current, () => setRender(false));
-    }
-    const timer = window.setTimeout(() => setRender(false), 230);
-    return () => window.clearTimeout(timer);
-  }, [open, onPresenceChange]);
+  }, [open]);
   useDialogFocus(pageRef, !!label && open && render, sharedChrome, initialFocus);
   const present = render && (open || !dragDismissed);
   useLayoutEffect(() => onPresenceChange?.(present), [onPresenceChange, present]);
@@ -212,12 +216,8 @@ export function Modal({ open, onClose, children, width = 340, height, label, rol
   open: boolean; onClose: () => void; children: React.ReactNode; width?: number; height?: number; label?: string;
   role?: "dialog" | "alertdialog"; describedBy?: string;
 }) {
-  const [render, setRender] = useState(open);
-  useEffect(() => {
-    if (open) setRender(true);
-    else { const t = window.setTimeout(() => setRender(false), 200); return () => window.clearTimeout(t); }
-  }, [open]);
   const modalRef = useRef<HTMLDivElement>(null);
+  const render = useMotionPresence(open, modalRef);
   useDialogFocus(modalRef, open && render);
   if (!render) return null;
   return (
@@ -272,11 +272,51 @@ export function Kbd({ children }: { children: React.ReactNode }) {
 
 /* ——— Toast ——— */
 export function ToastHost() {
-  const { toasts, dismissToast } = useStore();
-  return (
-    <div className="hg-toast-host absolute inset-x-0 z-[80] flex flex-col items-center gap-2 pointer-events-none px-6" style={{ bottom: "calc(var(--sab, 0px) + 96px)" }}>
+  const { toasts, dismissToast } = useToasts();
+  const host = useRef<HTMLDivElement>(null);
+  const latest = toasts.at(-1)?.id;
+  const popover = typeof HTMLElement.prototype.showPopover === "function";
+  useLayoutEffect(() => {
+    const viewport = window.visualViewport;
+    const update = () => {
+      if (!host.current) return;
+      Object.assign(host.current.style, {
+        left: `${viewport?.offsetLeft || 0}px`, top: `${viewport?.offsetTop || 0}px`,
+        width: `${viewport?.width || window.innerWidth}px`, height: `${viewport?.height || window.innerHeight}px`,
+      });
+    };
+    update();
+    viewport?.addEventListener("resize", update); viewport?.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    return () => { viewport?.removeEventListener("resize", update); viewport?.removeEventListener("scroll", update); window.removeEventListener("resize", update); };
+  }, []);
+  useLayoutEffect(() => {
+    const surface = host.current;
+    if (!surface || !popover) return;
+    const raise = () => {
+      if (!surface.isConnected) return;
+      const focused = document.activeElement;
+      if (surface.matches(":popover-open")) surface.hidePopover();
+      surface.showPopover();
+      if (focused instanceof HTMLElement && focused.isConnected && !focused.closest("[inert]") && document.activeElement !== focused) {
+        focused.focus({ preventScroll: true });
+      }
+    };
+    if (latest !== undefined) raise();
+    else if (surface.matches(":popover-open")) surface.hidePopover();
+    const followOverlay = (event: Event) => {
+      if (latest !== undefined && event.target instanceof HTMLElement && event.target !== surface && event.target.matches(":popover-open")) raise();
+    };
+    document.addEventListener("toggle", followOverlay, true);
+    return () => document.removeEventListener("toggle", followOverlay, true);
+  }, [latest, popover]);
+  return createPortal(
+    <div ref={host} role="status" aria-live="polite" aria-atomic="false" popover={popover ? "manual" : undefined}
+      className="hg-toast-host fixed inset-0 z-[300] flex flex-col items-center justify-center gap-2 pointer-events-none box-border"
+      style={{ margin: 0, border: 0, background: "transparent", color: "inherit", overflow: "visible", maxWidth: "none", maxHeight: "none",
+        paddingBlock: "max(16px, env(safe-area-inset-top), env(safe-area-inset-bottom))", paddingInline: "max(16px, env(safe-area-inset-left), env(safe-area-inset-right))" }}>
       {toasts.map((t) => (
-        <div key={t.id} className="a-toast hg-toast pointer-events-auto flex items-center gap-2 max-w-[min(360px,calc(100vw-32px))] bg-s4/95 backdrop-blur-md rounded-(--r-sm) px-3 py-2 elev-3">
+        <div key={t.id} className="a-toast hg-toast pointer-events-auto flex items-center gap-2 max-w-[min(360px,100%)] bg-s4/95 backdrop-blur-md rounded-(--r-sm) px-3 py-2 elev-3">
           {t.icon === "ok" && <ICheck size={16} className="text-mint shrink-0" />}
           {t.icon === "heart" && <IHeartF size={16} className="text-neon shrink-0" />}
           {t.icon === "star" && <IStarF size={16} className="text-amber shrink-0" />}
@@ -286,7 +326,7 @@ export function ToastHost() {
             onClick={() => { dismissToast(t.id); t.action?.run(); }}>{t.action.label}</button>}
         </div>
       ))}
-    </div>
+    </div>, document.body
   );
 }
 

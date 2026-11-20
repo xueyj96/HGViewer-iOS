@@ -57,14 +57,25 @@ export function usePlaybackGestures({ active, resetKey, isDesktop, isIos, kind, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, resetKey, rotated]);
   useEffect(() => {
+    if (!active) return;
     let width = window.innerWidth;
     const resize = () => { if (window.innerWidth !== width) { width = window.innerWidth; cancel(true); latest.current.cancelTap(); } };
     const layout = () => { cancel(true); latest.current.cancelTap(); };
+    const visibility = () => {
+      if (!document.hidden) return;
+      layout();
+      railSwipe.current = false;
+    };
+    document.addEventListener("visibilitychange", visibility);
     window.addEventListener("resize", resize);
     window.addEventListener(IOS_LAYOUT_CHANGE, layout);
-    return () => { window.removeEventListener("resize", resize); window.removeEventListener(IOS_LAYOUT_CHANGE, layout); };
+    return () => {
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("resize", resize);
+      window.removeEventListener(IOS_LAYOUT_CHANGE, layout);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [active]);
   /* 长按倍速、画面拖动进度和边缘滑动切集。 */
   const onDown = (e: React.PointerEvent<HTMLDivElement>, rail = false) => {
     if (!active || isDesktop || !e.isPrimary || e.button !== 0 || episodeBusy()) return;
@@ -209,14 +220,14 @@ export function usePlaybackGestures({ active, resetKey, isDesktop, isIos, kind, 
 
   /* 长按倍速期间禁止原生滚动，否则上滑会被列表吃掉、锁不住倍速 */
   useEffect(() => {
-    if (isDesktop) return undefined;
+    if (!active || isDesktop) return undefined;
     const el = boxRef.current;
     if (!el) return undefined;
     const fn = (e: TouchEvent) => { if (holdRef.current) e.preventDefault(); };
     el.addEventListener("touchmove", fn, { passive: false });
     return () => el.removeEventListener("touchmove", fn);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDesktop, boxRef, surfaceReady]);
+  }, [active, isDesktop, boxRef, surfaceReady]);
 
   /* —— 进度条拖动（旋转舞台下按 Y 轴换算） —— */
   const barPctAt = (e: React.PointerEvent<HTMLDivElement>) => {

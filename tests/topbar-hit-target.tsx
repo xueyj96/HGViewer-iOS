@@ -42,6 +42,11 @@ css.textContent = `
   .hg-ios-top-bar { position: relative; width: 320px; height: 260px; margin: 20px; }
   .hg-ios-floating-bar { position: absolute; left: 0; top: 0; display: flex; align-items: center; width: 320px; height: 64px; }
   .hg-ios-floating-panel { display: flex; align-items: center; justify-content: center; width: 120px; height: 44px; flex: none; border-radius: 14px; }
+  .hg-ios-floating-panel { position: relative; }
+  .hg-ios-floating-panel::before { content: ""; position: absolute; inset: 0; pointer-events: none; }
+  .hg-ios-nav-surface { position: absolute; }
+  .hg-ios-floating-bar.geometry-shift { top: 72px; }
+  .hg-ios-floating-panel.geometry-tall { height: 56px; }
   .old-title { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
   .hg-ios-segments { position: relative; z-index: 1; display: flex; align-items: center; gap: 20px; width: 220px; height: 44px; padding: 4px 10px; }
   .hg-ios-segments button { width: 90px; height: 36px; flex: none; border-width: 0; background: #ddd; }
@@ -115,6 +120,44 @@ try {
   results.push({ name: 'tab viewport pointerdown settles active morph', passed: true });
 } catch (error) { results.push({ name: 'tab viewport pointerdown settles active morph', passed: false, error: String(error) }); }
 
+const alignedSurface = () => {
+  const host = mounted!.host()!;
+  const panel = host.querySelector<HTMLElement>('[data-panel]')!.getBoundingClientRect();
+  const surface = host.querySelector<HTMLElement>('.hg-ios-nav-surface')!.getBoundingClientRect();
+  assert(Math.abs(panel.top - surface.top) < .5 && Math.abs(panel.height - surface.height) < .5,
+    `background separated from content: panel=${panel.top}/${panel.height}, surface=${surface.top}/${surface.height}`);
+};
+try {
+  await mountFresh(); await wait(300); alignedSurface();
+  mounted!.host()!.querySelector('.hg-ios-floating-bar')!.classList.add('geometry-shift');
+  mounted!.host()!.querySelector('[data-panel]')!.classList.add('geometry-tall');
+  await wait(320); alignedSurface();
+  results.push({ name: 'vertical-only safe-area and panel-height changes keep background aligned', passed: true });
+} catch (error) { results.push({ name: 'vertical-only safe-area and panel-height changes keep background aligned', passed: false, error: String(error) }); }
+try {
+  await mountFresh(); await wait(300); alignedSurface();
+  mounted!.host()!.querySelector<HTMLElement>('.hg-ios-floating-bar')!.style.top = '90px';
+  window.dispatchEvent(new Event('resize'));
+  await wait(80); alignedSurface();
+  results.push({ name: 'viewport layout settles background without a content mutation', passed: true });
+} catch (error) { results.push({ name: 'viewport layout settles background without a content mutation', passed: false, error: String(error) }); }
+
+try {
+  await mountFresh(); await wait(300);
+  const bar = mounted!.host()!.querySelector<HTMLElement>('.hg-ios-floating-bar')!;
+  bar.style.top = '110px';
+  document.dispatchEvent(new Event('visibilitychange'));
+  await wait(80); alignedSurface();
+  const viewport = window.visualViewport;
+  if (!viewport) throw Error('visual viewport unavailable');
+  bar.style.top = '36px';
+  viewport.dispatchEvent(new Event('scroll'));
+  bar.style.top = '48px';
+  viewport.dispatchEvent(new Event('resize'));
+  await wait(80); alignedSurface();
+  results.push({ name: 'foreground and interrupted visual-viewport changes keep only latest geometry', passed: true });
+} catch (error) { results.push({ name: 'foreground and interrupted visual-viewport changes keep only latest geometry', passed: false, error: String(error) }); }
+
 try {
   const adds: string[] = [], removes: string[] = [];
   const add = document.addEventListener, remove = document.removeEventListener;
@@ -130,7 +173,9 @@ try {
   };
   await mountFresh(); await startMorph(); freezeMidMorph();
   const target = animationFor(); assert(target, 'unmount case did not start a real morph animation');
+  window.dispatchEvent(new Event('resize'));
   await act(async () => root.unmount());
+  await wait(60);
   document.addEventListener = add; document.removeEventListener = remove;
   assert(['pointerdown', 'keydown', 'click'].every(type => adds.includes(type) && removes.includes(type)), `document gesture listeners were not removed at unmount: adds=${adds}, removes=${removes}`);
   assert(!hostRoot.querySelector('.hg-ios-top-bar'), 'unmount retained top bar host');

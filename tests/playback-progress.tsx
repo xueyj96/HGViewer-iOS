@@ -27,6 +27,20 @@ await test('cross episode flush retains old identity and rejects old callback',a
 await test('zero duration never final-flushes unbounded position',async({event,writes,unmount})=>{await event(r=>{r.onPlaying();r.onTime(9);r.onDuration(0);});await unmount();assert(writes.length===1,'zero duration persisted final');});
 await test('same-id new active session rejects previous epoch callbacks even after return',async({event,source,update,writes})=>{await event(r=>{r.onDuration(60);r.onPlaying();r.onTime(13);});const first=source();await update({active:false});await update({active:true});await event(()=>{first.onTime(58);first.onDuration(100);first.onPlaying();});assert(writes.length===2&&source().time===13&&source().duration===60,'old active epoch accepted after return');});
 await test('late duration after content switch cannot consume new pending return',async({event,source,update,seeks})=>{await event(r=>r.onTime(14));const first=source();await update({active:false});await update({active:true});await event(()=>first.onDuration(60));assert(!seeks.length,'retired duration consumed target');await event(r=>r.onDuration(60));assert(seeks.join()==='14','live duration lost return target');});
+await test('source recovery resumes once without another history record',async({event,update,seeks,writes})=>{
+ await event(r=>{r.onDuration(60);r.onPlaying();r.onTime(21);r.prepareRecovery(21);});
+ await update({attempt:'refreshed'});await event(r=>{r.onDuration(60);r.onDuration(60);r.onPlaying();});
+ assert(seeks.join()==='21'&&writes.length===1,'recovery lost position or duplicated history');
+});
+await test('paused recovery preserves a near-end position and clamps changed duration',async({event,update,seeks,writes})=>{
+ await event(r=>{r.onDuration(60);r.onTime(59.5);r.prepareRecovery(59.5);});
+ await update({attempt:'refreshed'});await event(r=>r.onDuration(40));
+ assert(seeks.length===1&&Math.abs(seeks[0]-39.95)<.001&&!writes.length,'near-end recovery restarted or recorded unplayed history');
+});
+await test('retired recovery cannot queue a seek for current episode',async({event,source,update,seeks})=>{
+ const retired=source();await update({ep:2});await event(()=>retired.prepareRecovery(22));
+ await event(r=>r.onDuration(60));assert(!seeks.length,'retired recovery leaked into another episode');
+});
 // Fresh mounts are necessary for the initial pending-resume contract.
 for(const target of [0,1,2,57,59]){
  const el=document.createElement('div');document.querySelector('#fixture')!.append(el);const root=createRoot(el);const seeks:number[]=[];

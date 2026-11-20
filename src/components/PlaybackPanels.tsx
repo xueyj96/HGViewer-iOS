@@ -1,10 +1,14 @@
+import { useRef } from "react";
+import { OfflineLibrary } from "../pages/Offline";
+import type { OfflineEpisode, OfflineShow } from "../api";
+import { IOSHeaderButton } from "./IOSHeaderButton";
 import type { Episode } from "../types";
 import { isIos, isMobile, fmt, offlineCover } from "../api";
-import { Avatar, CompactAction, Img, Sheet } from "./ui";
+import { Img, Sheet } from "./ui";
+import { AuthorCard } from "./AuthorCard";
 import { IOSPageBar } from "./IOSPageBar";
 import { IOSTabPages, IOSSwipeSegments, type useIOSTabSwipe } from "./IOSTabSwipe";
 import { ArticlePanel, CommentsPanel, EpisodeSortButton, EpisodesPanel } from "./Panels";
-import { cacheSize } from "./CachePageFrame";
 import { IClose, IDownload } from "../icons";
 
 export type PlaybackPanel = "episodes" | "comments" | "article" | "detail" | "quality" | null;
@@ -16,35 +20,41 @@ type Props = {
   detailPanel: "detail" | "episodes"; detailTabs: ReturnType<typeof useIOSTabSwipe>;
   cachedEpisodesPage: boolean; offlineItems: boolean; curId: number; curEp: number; playKey: string;
   kind: "video" | "post"; meta: Meta; episodes: Episode[]; descending: boolean;
-  articleHtml: string; hot?: number; hasOfflineCover: boolean; cachedBytes: number; followed: boolean;
-  openCache?: () => void; onCacheManagement: () => void;
+  articleHtml: string; hot?: number; hasOfflineCover: boolean; followed: boolean;
+  openCache?: () => void;
+  offlineSnapshot?: OfflineEpisode[];
+  active: boolean;
+  onPlayOfflineEpisode: (ep: number, items: OfflineEpisode[]) => void;
+  onOfflineItemsChange: (items: OfflineEpisode[]) => void;
+  onDeleteOfflineEpisode: (id: number, ep?: number) => Promise<void>;
   onPick: (ep: number) => void; onFollow: () => void; onSort: () => void; onClose: () => void;
+  onAuthor: () => void;
   onSelectDetail: (panel: "detail" | "episodes") => void;
   onCommentsPresence: (present: boolean) => void; onDetailsPresence: (present: boolean) => void;
 };
 
-/** Requested panel and exit snapshots remain owned by Feed; these views own no playback or requests. */
+/** Feed owns playback intent and panel presence; the shared offline body owns its download status/actions. */
 export default function PlaybackPanels(props: Props) {
   const { panel, activeDetailPanel, detailPanel, detailTabs, cachedEpisodesPage, offlineItems, curId, curEp, playKey,
-    kind, meta, episodes, descending, articleHtml, hot, openCache, onCacheManagement, onPick: pickEp,
+    kind, meta, episodes, descending, articleHtml, hot, openCache, onPick: pickEp,
     onSort: toggleEpisodeOrder, onClose, onSelectDetail, onCommentsPresence, onDetailsPresence } = props;
   const isDesktop = !isMobile;
   const fullDetails = isIos;
   const renderDetailContent = (showEpisodes: boolean) => <ShowDetailContent {...props} showEpisodes={showEpisodes} />;
   return <>
       {isIos && activeDetailPanel && (
-        <IOSPageBar overlay label={cachedEpisodesPage ? "已缓存分集工具" : "剧集详情与选集工具"}
+        <IOSPageBar overlay label={cachedEpisodesPage ? "已缓存分集工具" : offlineItems ? "离线剧集工具" : "剧集详情与选集工具"}
           onBack={onClose} fillTrailing={offlineItems}
           endAction={detailPanel === "episodes" ? (
             <EpisodeSortButton descending={descending} onToggle={toggleEpisodeOrder} />
-          ) : (offlineItems || openCache) && (
-            <button type="button" aria-label={offlineItems ? "缓存管理" : "缓存剧集"} onClick={offlineItems ? onCacheManagement : openCache} className="hg-ios-floating-button hg-ios-header-square grid place-items-center">
+          ) : !offlineItems && openCache && (
+            <IOSHeaderButton type="button" aria-label="缓存剧集" onClick={openCache} className="hg-ios-floating-button hg-ios-header-square grid place-items-center">
               <IDownload size={16} aria-hidden="true" />
-            </button>
+            </IOSHeaderButton>
           )}>
           {offlineItems ? (
             <h2 className="min-w-0 flex-1 truncate text-center text-[13px] font-semibold">
-              {cachedEpisodesPage ? "已缓存分集" : "离线剧集详情"}
+              {cachedEpisodesPage ? "已缓存分集" : "离线剧集"}
             </h2>
           ) : (
             <IOSSwipeSegments controller={detailTabs} label="详情与选集">
@@ -87,7 +97,7 @@ export default function PlaybackPanels(props: Props) {
 
           <Sheet open={activeDetailPanel !== null} onClose={onClose} sharedChrome={isIos}
             onPresenceChange={isIos ? onDetailsPresence : undefined}
-            fullPage={fullDetails ? cachedEpisodesPage ? "已缓存分集" : offlineItems ? "离线剧集详情" : "剧集详情与选集" : undefined}>
+            fullPage={fullDetails ? cachedEpisodesPage ? "已缓存分集" : offlineItems ? "离线剧集" : "剧集详情与选集" : undefined}>
             <div className={`hg-ios-show-sheet-content flex min-h-0 flex-col ${isIos ? "hg-ios-detail-page" : ""}`} style={isIos ? undefined : { height: "72vh" }}>
               {!isIos && <div className="flex shrink-0 items-center gap-2 px-4 pb-2">
                 <div role="group" aria-label="详情与选集" className="relative isolate flex h-11 min-w-0 flex-1 px-[3px]">
@@ -116,7 +126,7 @@ export default function PlaybackPanels(props: Props) {
 }
 
 function ShowDetailContent({ showEpisodes, cachedEpisodesPage, curId, curEp, episodes, openCache, descending,
-  offlineItems, hasOfflineCover, cachedBytes, meta, followed, onPick, onSort, onClose, onFollow }: Props & { showEpisodes: boolean }) {
+  offlineItems, meta, followed, onPick, onSort, onClose, onFollow, onAuthor, ...propsForOffline }: Props & { showEpisodes: boolean }) {
   const fullDetails = isIos;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -125,22 +135,7 @@ function ShowDetailContent({ showEpisodes, cachedEpisodesPage, curId, curEp, epi
           videoId={curId} episodes={episodes} current={curEp} onPick={onPick} onCache={fullDetails ? undefined : openCache}
           descending={descending} onSort={onSort} onClose={onClose} />
       ) : isIos && offlineItems ? (
-        <div className="hg-ios-browse-content min-h-0 scroll-y pb-5">
-          <section aria-label="缓存信息" className="hg-ios-content-card flex items-center gap-2">
-            {hasOfflineCover && (
-              <div className="hg-ios-detail-cover relative aspect-[3/4] shrink-0 overflow-hidden rounded-(--r-sm) bg-s3">
-                <Img key={curId} src={offlineCover(curId)} raw eager />
-              </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <h3 className="text-sm font-semibold leading-snug text-on [overflow-wrap:anywhere]">{meta.title}</h3>
-              <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs tabular-nums text-mut">
-                <span>已缓存 {episodes.length} 集</span>
-                <span>{cacheSize(cachedBytes)}</span>
-              </p>
-            </div>
-          </section>
-        </div>
+        <OfflinePlaybackDetails {...{ curId, meta, episodes }} {...propsForOffline} />
       ) : (
         <div className="hg-ios-browse-content min-h-0 scroll-y px-4 pb-5">
           {/* 封面 / 标题 / 评分 / 数据 */}
@@ -164,24 +159,7 @@ function ShowDetailContent({ showEpisodes, cachedEpisodesPage, curId, curEp, epi
             </div>
           </div>
 
-          {/* 作者 + 关注 */}
-          <div className="hg-ios-content-card hg-ios-content-card-next mt-4 flex items-center gap-2.5 rounded-(--r-md) bg-s2 p-2.5">
-            <Avatar size={isIos ? 32 : 34} name={meta.author} hue={220} />
-            <div className="flex-1 min-w-0">
-              <div className="text-[12.5px] font-semibold text-on truncate">{meta.author}</div>
-              <div className="text-[10px] text-mut">作者</div>
-            </div>
-            {meta.authorId > 0 && (isIos ? (
-              <CompactAction className="hg-ios-detail-follow" tone={followed ? "neutral" : "accent"} onClick={onFollow}>
-                {followed ? "已关注" : "关注"}
-              </CompactAction>
-            ) : (
-              <button onClick={onFollow}
-                className={`h-7 px-3 rounded-full text-[11px] font-semibold pressable ${followed ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
-                {followed ? "已关注" : "+ 关注"}
-              </button>
-            ))}
-          </div>
+          <ShowAuthorCard meta={meta} followed={followed} onAuthor={onAuthor} onFollow={onFollow} offlineItems={offlineItems} />
 
           {/* 简介 */}
           <div className="hg-ios-content-card hg-ios-content-card-next mt-4">
@@ -193,4 +171,23 @@ function ShowDetailContent({ showEpisodes, cachedEpisodesPage, curId, curEp, epi
     </div>
   );
 
+}
+
+function ShowAuthorCard({ meta, followed, onAuthor, onFollow, offlineItems }: Pick<Props, "meta" | "followed" | "onAuthor" | "onFollow" | "offlineItems">) {
+  if (offlineItems && meta.authorId <= 0) return null;
+  return <AuthorCard author={{ id: meta.authorId, name: meta.author }} onOpen={onAuthor}
+    follow={offlineItems ? undefined : { active: followed, onToggle: onFollow }}
+    className="hg-ios-content-card-next mt-4" />;
+}
+
+/** Same single-show content as the library route, hosted inside the retained playback sheet. */
+function OfflinePlaybackDetails({ curId, meta, episodes, offlineSnapshot, active, panel, onPlayOfflineEpisode,
+  hasOfflineCover, onOfflineItemsChange, onDeleteOfflineEpisode }: Pick<Props, "curId" | "meta" | "episodes" | "offlineSnapshot" | "active" | "panel" | "onPlayOfflineEpisode" | "hasOfflineCover" | "onOfflineItemsChange" | "onDeleteOfflineEpisode">) {
+  const scroll = useRef<HTMLDivElement>(null);
+  const initialShow: OfflineShow = { episodes: episodes.map(episode => episode.ep_num), cover: hasOfflineCover,
+    ...(meta.authorId > 0 ? { author: { id: meta.authorId, name: meta.author } } : {}) };
+  return <div ref={scroll} className="hg-ios-browse-content min-h-0 flex-1 scroll-y px-4 py-3 pb-5">
+    <OfflineLibrary id={curId} title={meta.title} scroll={scroll} active={active && panel === "detail"}
+      initialItems={offlineSnapshot} initialShow={initialShow} onPlayEpisode={onPlayOfflineEpisode} onItemsChange={onOfflineItemsChange} onDeleteEpisode={onDeleteOfflineEpisode} />
+  </div>;
 }

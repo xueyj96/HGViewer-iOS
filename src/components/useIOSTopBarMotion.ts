@@ -10,7 +10,8 @@ type Slot = {
 };
 type SurfaceMotion = { from: Box; to: Box; animation: Animation };
 const easing = "cubic-bezier(.2,0,.2,1)";
-const near = (a: Box, b: Box) => Math.abs(a.left - b.left) < .5 && Math.abs(a.width - b.width) < .5;
+const near = (a: Box, b: Box) => Math.abs(a.left - b.left) < .5 && Math.abs(a.top - b.top) < .5
+  && Math.abs(a.width - b.width) < .5 && Math.abs(a.height - b.height) < .5;
 const progress = (animation?: Animation) => Number(animation?.effect?.getComputedTiming().progress ?? 1);
 const mix = (a: number, b: number, p: number) => a + (b - a) * p;
 const remainingMove = (slot: Slot, index: number) => (slot.moves[index] || 0) * (1 - progress(slot.travel));
@@ -18,12 +19,14 @@ const opacityOf = (slot: Slot) => slot.incoming ? mix(slot.incomingFrom || 0, 1,
 const mixBox = (a: Box, b: Box, p: number): Box => ({ left: mix(a.left, b.left, p), top: mix(a.top, b.top, p), width: mix(a.width, b.width, p), height: mix(a.height, b.height, p) });
 const shapeOf = (element: HTMLElement): Shape => element.querySelector(".hg-ios-segments") ? "segments"
   : element.querySelector("input") ? "search-input" : element.querySelector('button[aria-label="搜索"]') ? "search-entry" : "title";
-const targetsOf = (element: HTMLElement, shape: Shape) => shape === "segments"
+const targetsOf = (element: HTMLElement, shape: Shape) => shape === "none"
+  ? [...element.querySelectorAll<HTMLElement>(".hg-ios-action-content")]
+  : shape === "segments"
   ? [...element.querySelectorAll<HTMLElement>(".hg-ios-segments > button")]
   : [...element.children] as HTMLElement[];
 const signatureOf = (element: HTMLElement, shape: Shape) => shape === "search-input"
   ? `input:${element.querySelector("input")?.getAttribute("placeholder")}`
-  : `${shape}:${element.textContent}|${[...element.querySelectorAll("button")].map((button) => button.getAttribute("aria-label") || button.textContent).join("|")}|${shape !== "segments" ? [...element.querySelectorAll("svg")].map((svg) => svg.innerHTML).join("|") : ""}`;
+  : `${shape}:${element.textContent}|${[...element.querySelectorAll("button")].map((button) => button.getAttribute("aria-label") || button.textContent).join("|")}|${shape !== "segments" ? [...element.querySelectorAll("svg")].map((svg) => `${["viewBox", "width", "height", "fill", "stroke", "stroke-width", "class", "transform"].map((name) => svg.getAttribute(name)).join(":")}:${svg.innerHTML}`).join("|") : ""}`;
 
 /** A disposable visual copy, never another navigation owner or an interactive form. */
 function snapshotOf(source: HTMLElement) {
@@ -54,6 +57,8 @@ export function useIOSTopBarMotion(host: HTMLElement | null) {
     let surfaceMotion: SurfaceMotion | undefined;
     let fadingSurface: { box: Box; animation: Animation } | undefined;
     const active = new Set<Animation>();
+    const replacedTargets = (old: Slot, next: Slot) => old.targets.length !== next.targets.length || old.targets.some((target, index) => target !== next.targets[index]);
+    const running = (animation?: Animation) => !!animation && active.has(animation);
     const ghosts = new Map<HTMLElement, { key: string; animation: Animation }>();
     const reduced = matchMedia("(prefers-reduced-motion: reduce)");
     const surface = document.createElement("div");
@@ -79,7 +84,7 @@ export function useIOSTopBarMotion(host: HTMLElement | null) {
       fadingSurface = undefined;
     };
     const currentSurface = () => surfaceMotion ? mixBox(surfaceMotion.from, surfaceMotion.to, progress(surfaceMotion.animation)) : surfaceBox ?? fadingSurface?.box ?? null;
-    const ghost = (key: string, slot: Slot, clock: number, hideSelection = false) => {
+    const ghost = (key: string, slot: Slot, clock: number, hideSelection = false, contentOnly = false) => {
       const opacity = opacityOf(slot);
       if (opacity < .001) return; // An invisible intermediate title does not need an outgoing layer.
       // Preserve the most visible layer when several routes change inside one entrance delay.
@@ -89,13 +94,14 @@ export function useIOSTopBarMotion(host: HTMLElement | null) {
         value.animation.cancel(); old.remove(); ghosts.delete(old);
       }
       const node = slot.snapshot.cloneNode(true) as HTMLElement;
+      if (contentOnly) node.classList.add("hg-ios-nav-ghost-content");
       Object.assign(node.style, { left: `${slot.box.left}px`, top: `${slot.box.top}px`, width: `${slot.box.width}px`, height: `${slot.box.height}px` });
       const inputs = [...slot.element.querySelectorAll<HTMLInputElement>("input")];
       node.querySelectorAll<HTMLInputElement>("input").forEach((input, index) => { if (inputs[index]) input.value = inputs[index].value; });
       targetsOf(node, slot.shape).forEach((target, index) => { target.style.transform = `translateX(${remainingMove(slot, index)}px)`; });
       if (hideSelection) node.querySelector<HTMLElement>(".hg-ios-swipe-indicator")?.style.setProperty("visibility", "hidden");
       host.appendChild(node);
-      const animation = run(node, [{ opacity }, { opacity: 0 }], 120, clock, 0, "ease-in");
+      const animation = run(node, [{ opacity }, { opacity: 0 }], key === "panel" ? 120 : 240, clock, 0, key === "panel" ? "ease-in" : "ease-in-out");
       ghosts.set(node, { key, animation });
       void animation.finished.catch(() => {}).then(() => { node.remove(); ghosts.delete(node); });
     };
@@ -137,12 +143,13 @@ export function useIOSTopBarMotion(host: HTMLElement | null) {
       })() : null;
       const changed = [...new Set([...next.keys(), ...previous.keys()])].some((key) => {
         const old = previous.get(key), current = next.get(key);
-        return !old || !current || old.signature !== current.signature || !near(old.box, current.box);
+        return !old || !current || old.signature !== current.signature || !near(old.box, current.box)
+          || replacedTargets(old, current) && (running(old.incoming) || running(old.travel));
       }) || !!surfaceBox !== !!nextSurface || !!(surfaceBox && nextSurface && !near(surfaceBox, nextSurface));
       if (animate && !reduced.matches && !changed) {
         for (const [key, slot] of next) {
           const old = previous.get(key);
-          if (old?.element === slot.element) { slot.incoming = old.incoming; slot.incomingFrom = old.incomingFrom; slot.travel = old.travel; slot.selectionMotion = old.selectionMotion; slot.moves = old.moves; }
+          if (old && !replacedTargets(old, slot)) { slot.incoming = old.incoming; slot.incomingFrom = old.incomingFrom; slot.travel = old.travel; slot.selectionMotion = old.selectionMotion; slot.moves = old.moves; }
         }
         previous = next;
         return;
@@ -152,18 +159,26 @@ export function useIOSTopBarMotion(host: HTMLElement | null) {
       const structural = oldPanel?.shape !== panel?.shape || oldPanel?.targets.length !== panel?.targets.length;
       const duration = structural ? 240 : 200, delay = structural ? 60 : 40;
       const continuingKeys = new Set([...ghosts.values()].map((value) => value.key));
+      for (const [node, value] of ghosts) if (value.key !== "panel" && next.has(value.key)) node.classList.add("hg-ios-nav-ghost-content");
       if (play) for (const [key, old] of previous) {
         const current = next.get(key);
-        if (!current || old.signature !== current.signature) ghost(key, old, clock, structural && old.shape === "segments" && panel?.shape === "segments");
+        if (!current || old.signature !== current.signature) ghost(key, old, clock, structural && old.shape === "segments" && panel?.shape === "segments", key !== "panel" && !!current);
       }
       for (const [key, slot] of next) {
         const old = previous.get(key);
         const contentChanged = !old || old.signature !== slot.signature;
+        const rebindOpacity = !!old && replacedTargets(old, slot) && running(old.incoming);
+        const rebindTravel = !!old && replacedTargets(old, slot) && running(old.travel);
         const continuing = !!old?.incoming && active.has(old.incoming) || continuingKeys.has(key);
         const fromOpacity = continuing && old ? opacityOf(old) : 0;
-        const enterDelay = continuing ? 0 : delay;
-        const enterDuration = continuing ? Math.max(80, duration * (1 - fromOpacity)) : duration - enterDelay;
-        if (play && (contentChanged || !near(old.box, slot.box))) {
+        const enterDelay = continuing || key !== "panel" ? 0 : delay;
+        const enterDuration = rebindOpacity
+          ? Math.max(1, Number(old.incoming!.effect?.getComputedTiming().endTime ?? 240) - Number(old.incoming!.currentTime ?? 0))
+          : key !== "panel" ? 240 : continuing ? Math.max(80, duration * (1 - fromOpacity)) : duration - enterDelay;
+        const fadeContent = contentChanged || rebindOpacity;
+        const travelDuration = rebindTravel && old?.travel
+          ? Math.max(1, Number(old.travel.effect?.getComputedTiming().endTime ?? duration) - Number(old.travel.currentTime ?? 0)) : duration;
+        if (play && (fadeContent || rebindTravel || !near(old.box, slot.box))) {
           // Move measured internal content, never scale the letters or the bar itself.
           slot.moves = slot.targets.map((_, index) => {
             const center = old && old.shape === slot.shape && old.centers[index] !== undefined
@@ -173,15 +188,15 @@ export function useIOSTopBarMotion(host: HTMLElement | null) {
           });
           slot.targets.forEach((target, index) => {
             const move = slot.moves[index];
-            const animation = run(target, contentChanged ? [
+            const animation = run(target, fadeContent ? [
               { opacity: fromOpacity, transform: `translateX(${move}px)` },
               { opacity: 1, transform: "translateX(0px)" },
-            ] : [{ transform: `translateX(${move}px)` }, { transform: "translateX(0px)" }], contentChanged ? enterDuration : duration, clock, contentChanged ? enterDelay : 0);
+            ] : [{ transform: `translateX(${move}px)` }, { transform: "translateX(0px)" }], fadeContent ? enterDuration : travelDuration, clock, fadeContent ? enterDelay : 0, key === "panel" ? easing : "ease-in-out");
             slot.travel = animation;
-            if (contentChanged) { slot.incoming = animation; slot.incomingFrom = fromOpacity; }
+            if (fadeContent) { slot.incoming = animation; slot.incomingFrom = fromOpacity; }
           });
           // A layout-only retarget replaces travel, while the earlier opacity still runs.
-          if (!contentChanged) { slot.incoming = old?.incoming; slot.incomingFrom = old?.incomingFrom; }
+          if (!fadeContent) { slot.incoming = old?.incoming; slot.incomingFrom = old?.incomingFrom; }
           // The selection surface changes shape separately; page-tab dragging owns its later movement.
           const indicator = slot.shape === "segments" && structural ? slot.element.querySelector<HTMLElement>(".hg-ios-swipe-indicator") : null;
           if (indicator) {
@@ -204,7 +219,7 @@ export function useIOSTopBarMotion(host: HTMLElement | null) {
       if (nextSurface) {
         Object.assign(surface.style, { left: `${nextSurface.left}px`, top: `${nextSurface.top}px`, width: `${nextSurface.width}px`, height: `${nextSurface.height}px`, opacity: "1" });
         if (play && beforeSurface && !near(beforeSurface, nextSurface)) {
-          const animation = run(surface, [{ left: `${beforeSurface.left}px`, width: `${beforeSurface.width}px` }, { left: `${nextSurface.left}px`, width: `${nextSurface.width}px` }], duration, clock);
+          const animation = run(surface, [{ left: `${beforeSurface.left}px`, top: `${beforeSurface.top}px`, width: `${beforeSurface.width}px`, height: `${beforeSurface.height}px` }, { left: `${nextSurface.left}px`, top: `${nextSurface.top}px`, width: `${nextSurface.width}px`, height: `${nextSurface.height}px` }], duration, clock);
           surfaceMotion = { from: beforeSurface, to: nextSurface, animation };
           void animation.finished.catch(() => {}).then(() => { if (surfaceMotion?.animation === animation) surfaceMotion = undefined; });
         }
@@ -238,15 +253,27 @@ export function useIOSTopBarMotion(host: HTMLElement | null) {
       return true;
     };
     const observer = new MutationObserver((records) => { if (records.some(meaningful)) update(); });
-    observer.observe(host, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class", "data-overlay", "data-nav-priority", "aria-pressed"] });
-    let hostWidth = host.clientWidth;
+    observer.observe(host, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class", "data-overlay", "data-nav-priority", "aria-pressed", "aria-label", "viewBox", "width", "height", "fill", "stroke", "stroke-width", "transform"] });
+    let hostWidth = host.clientWidth, hostHeight = host.clientHeight;
     const resize = new ResizeObserver(() => {
-      if (host.clientWidth === hostWidth) return;
-      hostWidth = host.clientWidth;
+      if (host.clientWidth === hostWidth && host.clientHeight === hostHeight) return;
+      hostWidth = host.clientWidth; hostHeight = host.clientHeight;
       update(false);
     });
     resize.observe(host);
     const settleEnvironment = () => update(false);
+    // Safe areas and WebKit viewport offsets can change without a content mutation.
+    // Settle once now and after layout; never move the fixed navigation host itself.
+    const viewport = window.visualViewport;
+    let layoutFrame = 0;
+    const settleViewport = () => {
+      cancelAnimationFrame(layoutFrame);
+      if (document.hidden) return;
+      update(false);
+      layoutFrame = requestAnimationFrame(() => {
+        layoutFrame = requestAnimationFrame(() => { layoutFrame = 0; update(false); });
+      });
+    };
     const takeGesture = (event: PointerEvent) => {
       if (!active.size && !ghosts.size) return;
       if (event.isPrimary && event.target instanceof Element && event.target.closest("[data-hg-tab-viewport]")) update(false);
@@ -272,10 +299,21 @@ export function useIOSTopBarMotion(host: HTMLElement | null) {
     };
     host.addEventListener("focusin", focus); host.addEventListener("focusout", focus);
     window.addEventListener(IOS_LAYOUT_CHANGE, settleEnvironment);
+    window.addEventListener("resize", settleViewport);
+    window.addEventListener("orientationchange", settleViewport);
+    viewport?.addEventListener("resize", settleViewport);
+    viewport?.addEventListener("scroll", settleViewport);
+    document.addEventListener("visibilitychange", settleViewport);
     reduced.addEventListener("change", settleEnvironment);
     update(false);
     return () => {
       observer.disconnect(); resize.disconnect(); theme.disconnect(); clear(); surface.remove();
+      cancelAnimationFrame(layoutFrame);
+      window.removeEventListener("resize", settleViewport);
+      window.removeEventListener("orientationchange", settleViewport);
+      viewport?.removeEventListener("resize", settleViewport);
+      viewport?.removeEventListener("scroll", settleViewport);
+      document.removeEventListener("visibilitychange", settleViewport);
       host.removeEventListener("focusin", focus); host.removeEventListener("focusout", focus);
       document.removeEventListener("pointerdown", takeGesture, true);
       document.removeEventListener("keydown", takeKeyboard, true);

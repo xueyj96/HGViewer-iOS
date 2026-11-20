@@ -132,13 +132,7 @@ export default function Player({
         } />
       )}
 
-      {errMsg && (isIos ? <PlaybackError message={errMsg} onRetry={onRetry} retrying={retrying} /> : (
-        <div className="hg-article-video-error absolute left-2 top-2 z-30 max-w-[80%] rounded bg-black/70 px-2 py-1 text-[10px] leading-tight text-red-300 break-all">
-          {errMsg}
-          {onRetry && <button type="button" disabled={retrying} onClick={onRetry}
-            className="ml-2 py-1 text-white underline pressable disabled:opacity-50">{retrying ? "加载中…" : "重试"}</button>}
-        </div>
-      ))}
+      {errMsg && <PlaybackError message={errMsg} onRetry={onRetry} retrying={retrying} />}
 
       {waiting && !errMsg && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

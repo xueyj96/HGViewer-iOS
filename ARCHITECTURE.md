@@ -4,7 +4,7 @@ HGViewer 用 React 渲染界面，Tauri 负责 WebView 与 Rust 的通信。iOS 
 
 | 要改什么 | 从哪里开始 |
 | --- | --- |
-| 标签、页面栈、主题 | [App.tsx](src/App.tsx)、[store.tsx](src/store.tsx)、[workspaceTabs.ts](src/workspaceTabs.ts) |
+| 标签、页面栈、主题 | [App.tsx](src/App.tsx)、[store.tsx](src/store.tsx)、[workspaceTabs.ts](src/workspaceTabs.ts)；v1本地数据读取校验在[persistedPreferences.ts](src/persistedPreferences.ts)，提示状态在[toasts.tsx](src/toasts.tsx) |
 | iOS 固定顶栏、底栏、侧栏和安全区 | [IOSNavigation.tsx](src/components/IOSNavigation.tsx)、[IOSPageBar.tsx](src/components/IOSPageBar.tsx)、[ios.css](src/ios.css)、[useIOSHorizontalInsets.ts](src/components/useIOSHorizontalInsets.ts) |
 | 播放、选集和评论 | 剧集从 [Feed.tsx](src/components/Feed.tsx) 进入，来源解析与邻集预取由 [usePlaybackSource.ts](src/components/usePlaybackSource.ts) 独立持有；图文视频从 [Posts.tsx](src/pages/Posts.tsx) 和 [Player.tsx](src/components/Player.tsx) 进入 |
 | iOS 播放和转屏 | [IOSVideoSurface.tsx](src/components/IOSVideoSurface.tsx) → [ios_player.rs](src-tauri/src/ios_player.rs) → [ios_player.m](src-tauri/src/ios_player.m)；转屏由 [iosPlaybackOrientation.ts](src/components/iosPlaybackOrientation.ts) 和 [ios_orientation.rs](src-tauri/src/ios_orientation.rs) 负责 |
@@ -14,7 +14,24 @@ HGViewer 用 React 渲染界面，Tauri 负责 WebView 与 Rust 的通信。iOS 
 
 `App` 管理当前路由和页面栈。页面内容在独立层内滑动，`IOSNavigation` 持有固定控件层。`IOSPageBar` 把当前页面的顶栏内容挂到固定容器。顶部动作与标题一起出现。需要异步数据的动作先保持原位并禁用，例如「选集」等到分集资料到齐才可点击。
 
+工作区容器通过 `isolate` 限定内部弹层的绘制层级。`inert` 只禁止交互，不能阻止旧详情继续绘制；从首页详情打开作者页时，旧详情必须留在工作区内部、新页面在其上方，返回才可恢复同一份详情状态。
+
+作者页在 `pages/Author.tsx`，以作者 ID 分页读取作品。在线详情、离线详情和缓存管理共用 `AuthorCard`。离线作者只保存 ID 与名字，由 `useOfflineAuthor` 统一读取本地资料并对缺失的旧资料尝试一次联网补齐；补齐失败不阻塞缓存播放。Show 元数据写入在同一 writer 锁内解析保留字段并提交，媒体文件不参与这类更新。
+
+频道分页由 `useChannelPages` 按频道和服务端排序分别持有快照。“最新／最热”对应 `new／popular`，追加页只去重、不重排已显示的前缀；每种排序保留自己的分页与滚动位置。打开播放器时使用当前网格的列表快照，避免播放顺序与画面顺序不一致。频道在各平台使用固定网格，追加时不重新平衡列高。
+
 `Feed` 提供侧栏按钮及其动作，固定容器负责显隐。进入和离开播放页时淡入淡出，播放页之间直接切换时更新按钮并保持侧栏位置。评论、详情和清晰度退场期间隐藏侧栏，退场完成后把键盘焦点交还原按钮。`finishMotion` 按实际动画完成时机清理；检查普通动画和「减少动态效果」两种设置。
+
+## iOS 播放链路
+
+[播放链路设计](docs/ios-playback-design.md)记录各阶段的持有者、生命周期、回退与验收。前端以剧集和集数表达选择，原生命令用 token 表达一次打开。媒体代理和预热输入按片源与线路范围匹配。
+
+| 责任 | 入口 |
+| --- | --- |
+| 片源与候选 | [usePlaybackSource.ts](src/components/usePlaybackSource.ts) 解析本地或在线片源，并按播放场景调度候选。 |
+| 前台会话与原生桥 | [ios_player.rs](src-tauri/src/ios_player.rs) 验证 token 并接管媒体资源。[ios_player.m](src-tauri/src/ios_player.m) 在主线程管理播放实例和视频层。 |
+| 输入预热 | [ios_player/preload.rs](src-tauri/src/ios_player/preload.rs) 持有在途任务、就绪输入和正在接管的前台请求。超时只取消已匹配的那次预热。 |
+| 代理与缓存 | [ios_media.rs](src-tauri/src/ios_media.rs) 负责回环代理与播放会话资源。[watch/streaming.rs](src-tauri/src/watch/streaming.rs) 负责启动 TS 流式交付，完整资源交给 [watch.rs](src-tauri/src/watch.rs) 的观看缓存写入器。 |
 
 ## 播放会话的组合
 
@@ -28,7 +45,9 @@ HGViewer 用 React 渲染界面，Tauri 负责 WebView 与 Rust 的通信。iOS 
 
 ## 播放来源的所有者
 
-`usePlaybackSource` 统一持有本地检查结果、在线URL记录和短期预热记录。Feed提供当前选择、重试身份、相邻候选和允许预取的时机，读取有效来源；重试通过`invalidateCurrentSource`清除当前项，调用方不能改整个URL表。来源模块不控制播放意图、不写历史、不发方向请求。当前仍保留原有450ms串行预取、30秒预热有效期和失效结果不发布的规则；已发出的请求尚不支持主动abort。
+`usePlaybackSource` 统一持有本地检查结果、在线URL记录和短期预热记录。Feed提供当前选择、重试身份、相邻候选和允许预取的时机，读取有效来源；重试通过`invalidateCurrentSource`清除当前项，调用方不能改整个URL表。来源模块不控制播放意图、不写历史、不发方向请求。播放最终失败时，Feed 为当前剧集与线路保留一次自动重新解析预算；只清除当前来源及其预热记录，显式重试才重置预算。本地缓存和图文不请求剧集地址。恢复沿用原进度与播放意图，`usePlaybackProgress.prepareRecovery` 把同步 seek 留到新来源的时长回调，退休回调不能排队；临近片尾按新时长限制目标，不重复首播历史。当前仍保留原有450ms串行预取、30秒预热有效期和失效结果不发布的规则；前端已经发出的片源请求通过身份校验丢弃迟到结果。iOS 原生输入预热可按播放身份主动取消。
+
+线路变化使远端数据失效，不等于重建播放会话。Feed的详情、图文和Source地址记录通过`useRevisionRecord`按单调递增的`lineRevision`隔离；旧effect失效，旧writer不能覆盖新revision。index、epMap、暂停意图和Progress保持原owner，本地offlineItems不因线路变化退回入口种子。其他远端栈页面按线路重载内容，外层route key、固定栏和Settings保持实例；缓存管理页不依赖线路。
 
 来源契约回归见[playback-source测试](tests/playback-source.html)，使用`pnpm dev`打开该测试页并启用iPhone UA；结果页报告本地优先、重试、迟到请求、预热复用／过期、取消与串行顺序。三App的分层、所有者和迁移边界见[结构契约v1](docs/cross-app-architecture.md)。
 
@@ -44,7 +63,9 @@ HGViewer 用 React 渲染界面，Tauri 负责 WebView 与 Rust 的通信。iOS 
 
 `useOfflineStatus` 共用一份状态快照和轮询，封面与详情使用相同的速度读数。缓存速度包含新写入和已验证复用的数据，网络速度只统计收到的数据，两者使用最近 30 秒的窗口。
 
-`offline_transfer` 保存完整分片和摘要，恢复时先检查本地数据。内置线路可通过上游内容摘要复核变更地址后的分片。全局分片缓冲并发上限为 8，单片上限为 16 MiB，AES 解密复用原缓冲区。整集提交后删除对应暂存，启动时清理已完成集的残留。
+快照读取和轮询归`offlineStatusStore`，React hook只持有页面的操作状态和活动订阅。操作后刷新先使旧读取失效，再串行取得新快照；失败保留上次可信数据并单独报告读取错误。隐藏页面不订阅快照、不保留轮询租约，激活后直接读取当前快照。它们都不拥有或取消原生下载。
+
+`offline_transfer` 保存完整分片和摘要，恢复时先检查本地数据。内置线路可通过上游内容摘要复核变更地址后的分片。失败诊断沿用有界日志，记录经过验证的媒体 hostname、request/response 归属、请求阶段和 HTTP 状态；没有响应时只能归属入口主机，不能猜测跳转后失败节点。日志不记录完整链接、签名参数、密钥、原始错误正文，也不增加队列字段。全局分片缓冲并发上限为 8，单片上限为 16 MiB，AES 解密复用原缓冲区。整集提交后删除对应暂存，启动时清理已完成集的残留。
 
 `ios_download_background.m` 管理持续后台任务和设备空闲时的恢复调度。恢复注册在 iOS 入口完成，队列选择由 Rust 持久化。手动暂停和关闭后台下载会阻止恢复。系统调度时间和锁屏行为需要真机验证。
 
@@ -77,4 +98,20 @@ HGViewer 用 React 渲染界面，Tauri 负责 WebView 与 Rust 的通信。iOS 
 
 `IOSSegments.tsx` 持有共享可视框和指示器几何；`IOSTabSwipe` 持有页面手势状态，设置的 `IOSSegmentedControl` 只持有本地指示器动画，不渲染页面预览。正文 pane 和分段指示器共用一次手势进度及完成时机，顶底栏通过现有导航 host 固定。`useIOSTopBarMotion.ts` 在持久顶栏内选择唯一 owner（全局登录优先于内容 overlay），分开处理真实背景几何与只读旧内容交接；不移动导航 host、不缩放文字，减少动态效果时直接完成。完整形态、来源路径、打断与验证边界见[导航动效状态图](docs/navigation-motion.md)。宽度或安全区变化取消拖动，单纯键盘高度变化不撤销选中操作。
 
+## 横切责任与共通契约
+
+本地喜欢、收藏和关注使用显式目标动作和纯`setMembership`策略；事件、提示及远端请求使用同一目标，不从React updater取得返回值。`persistedPreferences`保留`hghub_app_v1`键与字段，分别校验坏字段，继续兼容旧历史；不持久化接口中的额外字段。
+
+`ToastProvider`拥有提示状态与计时器；业务Store仅订阅稳定actions，ToastHost单独订阅快照，清历史仅移除历史撤销。不要把提示列表重新并入业务Context。当前其他业务数据仍沿用Store facade，不在未测量收益时拆成多套同步状态。
+
+[共通契约补充](docs/shared-contracts-v2.md)区分业务、导航与视觉结果，保留各App业务差异。[整体优化记录](docs/architecture-review-20261112.md)列出本轮范围、已修问题与验证边界。`node scripts/design-token-snapshot.mjs`只读输出生产CSS角色、表达式及来源哈希，不是第二份运行时尺寸定义。
+
 分栏动画结束后保持终帧和目标pane，直到页面提交新的选中索引，再在layout阶段归零并释放动画；回弹也在邻栏移除后清理。不要在animation finished回调里先重置正文位移，否则React提交前可能绘制旧页。
+
+账号状态由 `useAccountSession` 统一拥有，表单只拥有自己的展示 epoch；原生 `SessionStore` 用 revision lease、原子快照和有序持久化拒绝旧操作。退出请求资源与尚未核对的退出意图分开管理。Sheet／Modal 的视觉保留共用 `useMotionPresence`，不向业务返回成功。边界、失败语义和可运行回归见[账号与弹层生命周期](docs/account-session.md)。
+
+顶栏动作使用 `IOSHeaderButton` 的 React 内容层；转场不改变按钮材质／点击框，内容重挂按实际 target identity 续接动效。共享线框图标由单一工厂固定 stroke 2。Toast 继续使用原消息 owner，在正文之外持久挂载单一居中 Host，错误详情与重试入口分开，原本静默的操作不补提示。
+
+iOS 单文件缓存分别由 `offline_files` 管理文件身份／ready／元数据提交，`offline_finalize` 管理封装与旧缓存迁移，`offline_remux` 管理原生 worker 的有界并发与取消。播放器 reader lease 与迁移 reservation 保护清理边界；FFmpeg 在独立动态 framework 中。流程、兼容性和回归入口见[单文件缓存说明](docs/offline-single-file.md)。
+
+内置游客线路使用 `.com` 与 `.io`；候选可用不代表可以发送登录凭据，`supports_login` 来自同一份 `trusted_auth_origin` 策略。镜像发布页仅解析有大小上限的静态清单，验证后供手动检测和切换，不执行远端脚本或自动修改 API。首页探测只声明首页最低结构可用，不代表搜索、播放或 CDN 已健康。

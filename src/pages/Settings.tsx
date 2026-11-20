@@ -1,7 +1,9 @@
+import { IOSHeaderButton } from "../components/IOSHeaderButton";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, APP_NAME, APP_VERSION, hostOf, isIos, platformLabel, type DownloadSettings, type UpdateInfo } from "../api";
 import { HISTORY_LIMIT, useStore } from "../store";
 import { ActionDialog, CompactAction, ConfirmAction, Modal, Sheet, Toggle } from "../components/ui";
+import { useToastFeedback } from "../components/useToastFeedback";
 import { IOSPageBar } from "../components/IOSPageBar";
 import { IOSSegmentedControl } from "../components/IOSSegments";
 import { useIOSSymbols } from "../components/IOSSymbol";
@@ -31,7 +33,7 @@ function DownloadSettingRow({ label, description, unit, icon, value, disabled, r
     <select aria-label={label} value={value ?? ""} disabled={disabled || value === undefined}
       className="min-h-11 rounded-(--r-ctl) bg-s3 px-3 text-sm font-medium text-primary"
       onChange={(event) => onChange(Number(event.target.value))}>
-      {value === undefined && <option value="">{readFailed ? "读取失败" : "读取中"}</option>}
+      {value === undefined && <option value="">{readFailed ? "—" : "读取中"}</option>}
       {[1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}{unit && ` ${unit}`}</option>)}
     </select>
     </span>
@@ -46,7 +48,6 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   const [clearOpen, setClearOpen] = useState(false);
   const [historyClearOpen, setHistoryClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
-  const [clearError, setClearError] = useState("");
   const [lineOpen, setLineOpen] = useState(false);
   const [lineBase, setLineBase] = useState("");
   const [checking, setChecking] = useState(false);
@@ -56,6 +57,8 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   const [savingDownloads, setSavingDownloads] = useState(false);
   const [diagnosis, setDiagnosis] = useState<{ status: "loading" | "failed" } | { status: "ready"; text: string } | null>(null);
   const [diagnosisOpen, setDiagnosisOpen] = useState(false);
+  useToastFeedback(downloadReadStatus === "failed" ? "下载设置读取失败，当前设置未更改" : "");
+  useToastFeedback(diagnosis?.status === "failed" ? "诊断失败，请退出后重试。" : "", diagnosisOpen);
 
   const symbol = useIOSSymbols();
 
@@ -172,6 +175,11 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
           <span className="text-[12px] text-on/85">PolyForm Noncommercial 1.0.0</span>
           <span className="ml-auto text-[10.5px] text-mut">仅限非商业</span>
         </div>
+        {isIos && <div className="py-2.5 text-[12px] leading-5 text-on/85">
+          <div>FFmpeg 9.0.2 · LGPL-2.1-or-later</div>
+          <a href="https://github.com/xueyj96/HGViewer-iOS/blob/main/docs/remux-engine.md" className="inline-flex min-h-11 items-center text-primary"
+            onClick={(event) => { event.preventDefault(); void api.openUrl(event.currentTarget.href).catch(() => {}); }}>源码与替换说明</a>
+        </div>}
       </div>
 
       {!isIos && <button onClick={() => setAbout(false)} className="mt-4 w-full min-h-11 rounded-(--r-ctl) bg-s3 text-[13px] font-semibold text-on pressable">知道了</button>}
@@ -182,10 +190,10 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
     <div className="hg-ios-settings-page absolute inset-0 bg-bg flex flex-col">
       {isIos ? (
         <IOSPageBar label="设置" onBack={onBack} endAction={
-          <button type="button" aria-label={`关于 ${APP_NAME}`} onClick={() => setAbout(true)}
+          <IOSHeaderButton type="button" aria-label={`关于 ${APP_NAME}`} onClick={() => setAbout(true)}
             className="hg-ios-floating-button hg-ios-header-square grid place-items-center">
             <IInfo size={16} aria-hidden="true" />
-          </button>
+          </IOSHeaderButton>
         }>
           <h1 className="min-w-0 flex-1 truncate text-center text-[13px] font-semibold">设置</h1>
         </IOSPageBar>
@@ -197,7 +205,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
             <div className="px-2 mt-1 flex items-end justify-between">
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="w-9 h-9 shrink-0 rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center">{symbol("gearshape", <ISettings size={20} strokeWidth={1.7} />, 20)}</span>
+                  <span className="w-9 h-9 shrink-0 rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center">{symbol("gearshape", <ISettings size={20} />, 20)}</span>
                   <span className="hg-ios-large-title text-[24px] font-bold tracking-wide text-on">设置</span>
                 </div>
                 <div className="text-[11px] text-mut mt-1">{isIos ? "账号 · 外观 · 本地数据" : "外观 · 本地数据 · 诊断"}</div>
@@ -256,11 +264,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 icon={symbol("bolt", <IBoltF size={16} />)}
                 value={downloads?.segments} disabled={savingDownloads} readFailed={downloadReadStatus === "failed"} onChange={(segments) => void changeDownloadSettings({ segments })} />
               {downloadReadStatus === "failed" && <div className="hg-ios-settings-row flex items-center gap-3 px-3.5 py-3">
-                <div className="min-w-0 flex-1">
-                  <div role="alert" className="text-[12px] leading-5 text-danger">下载设置读取失败</div>
-                  <div className="text-[11px] leading-4 text-mut">当前设置未更改</div>
-                </div>
-                <CompactAction tone="neutral" onClick={() => void readDownloadSettings()}>重试</CompactAction>
+                <CompactAction tone="neutral" className="ml-auto" onClick={() => void readDownloadSettings()}>重试</CompactAction>
               </div>}
               {savingDownloads && <span role="status" className="sr-only">正在保存下载设置…</span>}
           </Section>}
@@ -350,7 +354,6 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
         cancel="退出" confirm="复制诊断" disabled={diagnosis?.status !== "ready"}
         onConfirm={() => { if (diagnosis?.status === "ready") void copyDiagnosis(diagnosis.text); }}>
         {diagnosis?.status === "loading" && <p role="status">正在检测…</p>}
-        {diagnosis?.status === "failed" && <p role="alert">诊断失败，请退出后重试。</p>}
         {diagnosis?.status === "ready" && <pre tabIndex={0} aria-label="诊断详情"
           className="select-text whitespace-pre-wrap break-all text-[11px] leading-5">{diagnosis.text}</pre>}
       </ActionDialog>
@@ -359,8 +362,8 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
         <Sheet open={about} onClose={() => setAbout(false)} fullPage="关于" sharedChrome z="z-[32]">
           <div className="hg-ios-about-page flex h-full min-h-0 flex-col">
             <IOSPageBar label="关于" overlay hidden={!about} onBack={() => setAbout(false)} endAction={
-              <button type="button" aria-label="复制版本信息" onClick={() => void copyVersionInfo()}
-                className="hg-ios-floating-button hg-ios-header-square grid place-items-center text-[13px] font-semibold text-primary">复制</button>
+              <IOSHeaderButton type="button" aria-label="复制版本信息" onClick={() => void copyVersionInfo()}
+                className="hg-ios-floating-button hg-ios-header-square grid place-items-center text-[13px] font-semibold text-primary">复制</IOSHeaderButton>
             }>
               <h1 className="min-w-0 flex-1 truncate text-center text-[13px] font-semibold">关于</h1>
             </IOSPageBar>
@@ -380,17 +383,16 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
 
       <ConfirmAction open={clearOpen} title="清理缓存"
         message="清理封面与播放列表的临时缓存？收藏、历史、登录状态和已下载分集都会保留。"
-        confirm={clearing ? "清理中…" : "确定清理"} danger={false} busy={clearing} error={clearError}
-        onCancel={() => { setClearError(""); setClearOpen(false); }}
+        confirm={clearing ? "清理中…" : "确定清理"} danger={false} busy={clearing}
+        onCancel={() => setClearOpen(false)}
         onConfirm={async () => {
           setClearing(true);
-          setClearError("");
           try {
             await api.clearCache();
             setClearOpen(false);
             toast("缓存已清理", "ok");
           } catch {
-            setClearError("缓存清理失败，请重试");
+            toast("缓存清理失败，请重试", "info");
           } finally {
             setClearing(false);
           }

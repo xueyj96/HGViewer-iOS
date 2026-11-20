@@ -1,80 +1,39 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { api, type OfflineState } from "../api";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { api } from "../api";
+import { createOfflineStatusStore } from "../offlineStatusStore";
+import { useToastActions } from "../toasts";
+import { useToastFeedback } from "./useToastFeedback";
+import { useIOSNavigation } from "./IOSNavigation";
 
-type OfflineSnapshot = { state?: OfflineState; readError: string };
-
-let snapshot: OfflineSnapshot = { readError: "" };
-let revision = 0;
-let activeReaders = 0;
-let pollTimer: number | undefined;
-let polling = false;
-const listeners = new Set<() => void>();
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => { listeners.delete(listener); };
-}
-
-function getSnapshot() {
-  return snapshot;
-}
-
-function publish(next: OfflineSnapshot) {
-  snapshot = next;
-  listeners.forEach((listener) => listener());
-}
-
-async function refresh() {
-  const request = ++revision;
-  try {
-    const state = await api.offlineStatus();
-    if (request === revision) publish({ state, readError: "" });
-  } catch (error) {
-    if (request === revision) {
-      publish({ ...snapshot, readError: (error as Error).message || "无法读取本地缓存" });
-    }
-    throw error;
-  }
-}
-
-async function poll() {
-  pollTimer = undefined;
-  polling = true;
-  await refresh().catch(() => {});
-  polling = false;
-  if (activeReaders === 0) return;
-  const hasActiveJob = !snapshot.readError && snapshot.state?.jobs.some((job) => job.running || job.queued);
-  pollTimer = window.setTimeout(poll, hasActiveJob ? 700 : 1800);
-}
-
-function startReading() {
-  activeReaders++;
-  if (!polling && pollTimer === undefined) void poll();
-  return () => {
-    activeReaders--;
-    if (activeReaders === 0) {
-      window.clearTimeout(pollTimer);
-      pollTimer = undefined;
-    }
-  };
-}
+const { subscribe, getSnapshot, refresh, retain } = createOfflineStatusStore(api.offlineStatus);
+const subscribeInactive = () => () => {};
 
 export function useOfflineStatus(active: boolean) {
-  const { state, readError } = useSyncExternalStore(subscribe, getSnapshot);
+  const { state, readError } = useSyncExternalStore(active ? subscribe : subscribeInactive, getSnapshot);
   const [busy, setBusy] = useState(false);
-  const [actionError, setActionError] = useState("");
   const actionPending = useRef(false);
+  const reporting = useRef(active);
+  const presentationEpoch = useRef(0);
+  const { active: navigationActive } = useIOSNavigation();
+  const toast = useToastActions()?.toast;
+  useLayoutEffect(() => {
+    ++presentationEpoch.current;
+    reporting.current = active && navigationActive;
+    return () => { reporting.current = false; ++presentationEpoch.current; };
+  }, [active, navigationActive]);
+  useToastFeedback(readError, active, "offline-read");
 
   const runAction = async (action: () => Promise<void>) => {
     if (actionPending.current) return;
+    const startedInPresentation = presentationEpoch.current;
     actionPending.current = true;
     setBusy(true);
-    setActionError("");
     try {
       await action();
       await refresh().catch(() => {});
     } catch (error) {
-      setActionError((error as Error).message || "操作失败，请重试");
+      const message = (error as Error).message || "操作失败，请重试";
+      if (reporting.current && startedInPresentation === presentationEpoch.current) toast?.(message, "info");
     } finally {
       actionPending.current = false;
       setBusy(false);
@@ -82,8 +41,8 @@ export function useOfflineStatus(active: boolean) {
   };
 
   useEffect(() => {
-    if (active) return startReading();
+    if (active) return retain();
   }, [active]);
 
-  return { state, readError, refresh, busy, actionError, runAction };
+  return { state, readError, refresh, busy, runAction };
 }

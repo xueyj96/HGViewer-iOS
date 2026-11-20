@@ -1,3 +1,4 @@
+import { IOSHeaderButton } from "./IOSHeaderButton";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { appendUniqueById } from "../collections";
 import { api, fmt, isIos, cover as imageCover } from "../api";
@@ -7,16 +8,17 @@ import { useStore } from "../store";
 import { Avatar, CompactAction, Empty, LoadingStatus, PageStatus } from "./ui";
 import { CompactDownloadButton } from "./DownloadControls";
 import { useIOSKeyboardViewport } from "./useIOSKeyboardViewport";
+import { useToastFeedback } from "./useToastFeedback";
 import { IOSPageBar } from "./IOSPageBar";
 import { useIOSNavigation } from "./IOSNavigation";
 import { IClose, IHeart, IRefresh, ISendF, ISortDown } from "../icons";
 
 /* ================= 选集 ================= */
 export function EpisodeSortButton({ descending, onToggle }: { descending: boolean; onToggle: () => void }) {
-  return <button type="button" aria-label={descending ? "正序排列" : "倒序排列"} onClick={onToggle}
+  return <IOSHeaderButton type="button" aria-label={descending ? "正序排列" : "倒序排列"} onClick={onToggle}
     className="hg-ios-floating-button hg-ios-header-square grid place-items-center">
     <ISortDown size={16} className={descending ? "-scale-y-100" : ""} aria-hidden="true" />
-  </button>;
+  </IOSHeaderButton>;
 }
 
 export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, onCache, descending, onSort, bare = false, cachedOnly = false, sortInHeader = false }: {
@@ -83,15 +85,19 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", showNavigati
   const loadRevision = useRef(0);
   const panelRef = useRef<HTMLDivElement>(null);
   const { active } = useIOSNavigation();
+  useToastFeedback(failed && !loading ? "评论加载失败" : "", active && (!isIos || showNavigation));
   const canReportRefresh = useRef(false);
+  const refreshPresentationEpoch = useRef(0);
   useLayoutEffect(() => {
+    ++refreshPresentationEpoch.current;
     canReportRefresh.current = showNavigation && active;
-    return () => { canReportRefresh.current = false; };
+    return () => { canReportRefresh.current = false; ++refreshPresentationEpoch.current; };
   }, [showNavigation, active]);
   useIOSKeyboardViewport(panelRef);
 
   const load = async (p: number, refreshing = false) => {
     const revision = ++loadRevision.current;
+    const presentation = refreshPresentationEpoch.current;
     setLoading(true);
     try {
       const res: CommentPage | null = kind === "post"
@@ -105,7 +111,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", showNavigati
     } catch {
       if (revision !== loadRevision.current) return;
       if (refreshing && items.length) {
-        if (canReportRefresh.current) toast("评论刷新失败，请重试", "info");
+        if (canReportRefresh.current && presentation === refreshPresentationEpoch.current) toast("评论刷新失败，请重试", "info");
       } else {
         setFailed(true);
         if (p === 1) setItems([]);
@@ -142,11 +148,11 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", showNavigati
     <div ref={panelRef} className="hg-ios-comments-panel flex h-full min-h-0 flex-col">
       {isIos && showNavigation && (
         <IOSPageBar overlay label="评论工具" onBack={onClose} endAction={
-          <button type="button" aria-label="刷新评论" aria-disabled={loading} aria-busy={loading}
+          <IOSHeaderButton type="button" aria-label="刷新评论" aria-disabled={loading} aria-busy={loading}
             onClick={() => { if (!loading) void load(1, true); }}
             className="hg-ios-floating-button hg-ios-header-square grid place-items-center aria-disabled:opacity-50">
             <IRefresh size={16} aria-hidden="true" />
-          </button>
+          </IOSHeaderButton>
         }>
           <h2 className="min-w-0 flex-1 truncate text-center text-[13px] font-semibold">
             {kind === "video" ? `第 ${ep} 集 · 评论` : "评论"}
@@ -180,7 +186,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", showNavigati
         )) : loading ? (
           <div className="flex justify-center"><LoadingStatus variant="initial" label="正在加载评论" /></div>
         ) : failed ? (
-          <PageStatus title="评论加载失败" onRetry={() => void load(1)} />
+          <div className="flex justify-center"><CompactAction tone="neutral" onClick={() => void load(1)}>重试</CompactAction></div>
         ) : isIos ? (
           <PageStatus title="还没有评论" />
         ) : (

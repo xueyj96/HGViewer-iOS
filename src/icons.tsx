@@ -1,12 +1,12 @@
 import React from "react";
 
-type P = { size?: number; className?: string; style?: React.CSSProperties; strokeWidth?: number };
+type P = { size?: number; className?: string; style?: React.CSSProperties };
 const S = (d: React.ReactNode, fill = false) =>
-  function Icon({ size = 24, className = "", style, strokeWidth = 2 }: P) {
+  function Icon({ size = 24, className = "", style }: P) {
     return (
       <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={style}
         fill={fill ? "currentColor" : "none"} stroke={fill ? "none" : "currentColor"}
-        strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         {d}
       </svg>
     );
@@ -29,14 +29,14 @@ export const IComment = S(<path d="M12 3.4c5 0 9.2 3.6 9.2 8.2S17 19.8 12 19.8c-
 export const IExpand = S(<><path d="M8.5 3.5H3.5v5" /><path d="M15.5 3.5h5v5" /><path d="M8.5 20.5h-5v-5" /><path d="M15.5 20.5h5v-5" /></>);
 export const ICompress = S(<><path d="M3.5 8.5h5v-5" /><path d="M20.5 8.5h-5v-5" /><path d="M3.5 15.5h5v5" /><path d="M20.5 15.5h-5v5" /></>);
 export const IRotateScreen = S(<><rect x="4.5" y="4" width="8" height="13" rx="2" /><path d="M11 20h7a2 2 0 0 0 2-2v-4M15 5a6 6 0 0 1 5 5m-3-2 3 2 2-3" /></>);
-export const IBack = S(<path d="m14.5 5-7 7 7 7" strokeWidth={2.4} />);
+export const IBack = S(<path d="m14.5 5-7 7 7 7" />);
 export const IChevR = S(<path d="m9.5 5 7 7-7 7" />);
 export const IPlayF = S(<path d="M7.5 4.3c0-1 1.1-1.6 2-1.1l11 6.7c.9.5.9 1.7 0 2.2l-11 6.7c-.9.5-2-.1-2-1.1Z" />, true);
 export const IPauseF = S(<><rect x="5.5" y="3.5" width="4.6" height="17" rx="1.6" /><rect x="13.9" y="3.5" width="4.6" height="17" rx="1.6" /></>, true);
 export const IPlus = S(<><path d="M12 5v14" /><path d="M5 12h14" /></>);
 export const ICheck = S(<path d="m4.5 12.5 5 5 10-11" />);
 export const IClose = S(<><path d="m6 6 12 12" /><path d="M18 6 6 18" /></>);
-export const ITrophy = S(<><path d="M8 4h8v6a4 4 0 0 1-8 0Z" /><path d="M8 5H4.5v1.5A3.5 3.5 0 0 0 8 10" /><path d="M16 5h3.5v1.5A3.5 3.5 0 0 1 16 10" /><path d="M12 14v3.5" /><path d="M8 20.5h8" /><path d="M9.5 17.5h5v3h-5Z" /></>);
+export const ITrophy = S(<><path d="M8 4h8v6a4 4 0 0 1-8 0Z" /><path d="M8 5H4.5v1.5A3.5 3.5 0 0 0 8 10" /><path d="M16 5h3.5v1.5A3.5 3.5 0 0 1 16 10" /><path d="M12 14v6.5M8 20.5h8" /></>);
 export const IFireF = S(<path d="M12.6 2.6c.3-.3.9-.1.9.4.1 1.7.6 3.4 2 4.9 1.7 1.8 3.5 3.7 3.5 6.6 0 4-3.1 7-7 7s-7-3-7-7c0-2.3 1.1-4.2 2.4-5.6.3-.3.9-.1 1 .3.2.8.5 1.5 1.1 2 .1-3.1 1.2-6.5 3.1-8.6Z" />, true);
 export const ITrendUp = S(<path d="m4 16 5-5 3.5 3.5L20 8m0 0h-5m5 0v5" />);
 export const ITrendDown = S(<path d="m4 8 5 5 3.5-3.5L20 16m0 0h-5m5 0v-5" />);
@@ -44,11 +44,11 @@ export const IMusic = S(<><path d="M9 18.5V6l11-2.2V16" /><circle cx="6.5" cy="1
 export const IMore = S(<><circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none" /></>);
 export const IEye = S(<><path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="2.8" /></>);
 export const IEyeOff = S(<><path d="M4 4.5 20 19.5" /><path d="M9.9 6.2A9.4 9.4 0 0 1 12 5.8c6 0 9.5 6.2 9.5 6.2a17.5 17.5 0 0 1-3 3.5M6.6 7.4A16.6 16.6 0 0 0 2.5 12S6 18.2 12 18.2c1.2 0 2.3-.2 3.3-.6" /></>);
-export const ILockF = S(<><rect x="5" y="10.5" width="14" height="10" rx="2.6" /><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" strokeWidth="2.2" /></>, true);
+export const ILockF = S(<><rect x="5" y="10.5" width="14" height="10" rx="2.6" /><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" strokeWidth="2" /></>, true);
 export const IBoltF = S(<path d="M13.4 2.3 4.8 13.1c-.4.5 0 1.2.6 1.2h5l-1.7 7.2c-.2.7.7 1.1 1.2.6l8.6-10.8c.4-.5 0-1.2-.6-1.2h-5l1.7-7.2c.2-.7-.7-1.1-1.2-.6Z" />, true);
 export const IVol = S(<><path d="M4 9.5v5h3.2L12 18.8V5.2L7.2 9.5Z" fill="currentColor" stroke="none" /><path d="M15.5 9a4.3 4.3 0 0 1 0 6" /><path d="M18 6.5a8 8 0 0 1 0 11" /></>);
 export const IVolMute = S(<><path d="M4 9.5v5h3.2L12 18.8V5.2L7.2 9.5Z" fill="currentColor" stroke="none" /><path d="m15.5 9.5 5 5" /><path d="m20.5 9.5-5 5" /></>);
-export const ISettings = S(<><circle cx="12" cy="12" r="3.2" /><path d="M12 2.8 13.6 5h2.7l.9 2.5 2.4 1.2-.5 2.7 1.7 2.1-1.7 2.1.5 2.7-2.4 1.2-.9 2.5h-2.7L12 21.2 10.4 19H7.7l-.9-2.5-2.4-1.2.5-2.7L3.2 10.5l1.7-2.1-.5-2.7L6.8 4.5 7.7 2h2.7Z" strokeWidth={1.6} /></>);
+export const ISettings = S(<><circle cx="12" cy="12" r="3.2" /><path d="M12 2.8 13.6 5h2.7l.9 2.5 2.4 1.2-.5 2.7 1.7 2.1-1.7 2.1.5 2.7-2.4 1.2-.9 2.5h-2.7L12 21.2 10.4 19H7.7l-.9-2.5-2.4-1.2.5-2.7L3.2 10.5l1.7-2.1-.5-2.7L6.8 4.5 7.7 2h2.7Z" /></>);
 export const ILogout = S(<><path d="M14 4.5H7A2.5 2.5 0 0 0 4.5 7v10A2.5 2.5 0 0 0 7 19.5h7" /><path d="m16 8 4 4-4 4" /><path d="M20 12H9.5" /></>);
 export const ILogin = S(<><path d="M10 4.5h7A2.5 2.5 0 0 1 19.5 7v10a2.5 2.5 0 0 1-2.5 2.5h-7" /><path d="m12 8 4 4-4 4" /><path d="M16 12H4.5" /></>);
 export const ITrash = S(<><path d="M4.5 6.5h15" /><path d="M8 6.5V5a1.5 1.5 0 0 1 1.5-1.5h5A1.5 1.5 0 0 1 16 5v1.5" /><path d="M6.5 6.5 7.4 19a2 2 0 0 0 2 1.8h5.2a2 2 0 0 0 2-1.8l.9-12.5" /><path d="M10 10.5v6M14 10.5v6" /></>);
@@ -59,7 +59,7 @@ export const ILink = S(<><path d="M9.5 14.5 14.5 9.5" /><path d="M11 6.5 13 4.5a
 export const IFlag = S(<><path d="M5.5 21V4" /><path d="M5.5 4.5c4-2.4 8 2.4 13 0v9c-5 2.4-9-2.4-13 0" /></>);
 export const IBan = S(<><circle cx="12" cy="12" r="8.5" /><path d="M6 6l12 12" /></>);
 export const IClock = S(<><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5.2l3.4 2" /></>);
-export const IKeyboard = S(<><rect x="2.5" y="6" width="19" height="12" rx="2.5" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" strokeWidth={2.2} /></>);
+export const IKeyboard = S(<><rect x="2.5" y="6" width="19" height="12" rx="2.5" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" /></>);
 export const ISendF = S(<path d="M3.6 11 19.4 3.6c.8-.4 1.6.4 1.3 1.2L14.4 20.7c-.3.8-1.5.8-1.8 0l-2-5.4a1 1 0 0 0-.6-.6l-6.3-1.9c-.9-.2-.9-1.4-.1-1.8Z" />, true);
 export const IRefresh = S(<><path d="M20 12a8 8 0 1 1-2.5-5.8" /><path d="M20 3.5V7h-3.5" /></>);
 export const ISparkF = S(<path d="M12 2.5c.6 3.9 1.7 6.1 3.3 7.7 1.6 1.6 3.8 2.6 6.2 3.3-3.9.6-6.1 1.7-7.7 3.3-1.6 1.6-2.6 3.8-3.3 6.2-.6-3.9-1.7-6.1-3.3-7.7-1.6-1.6-3.8-2.6-6.2-3.3 3.9-.6 6.1-1.7 7.7-3.3 1.6-1.6 2.6-3.8 3.3-6.2Z" />, true);

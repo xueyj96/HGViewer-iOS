@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { api, isIos, offlineCover } from "../api";
+import { api, isIos, offlineCover, type OfflineEpisode, type OfflineShow } from "../api";
 import { IChevR, IClock, IDownload, IRefresh, ITrash } from "../icons";
 import { CompactDownloadButton, DownloadProgressCard, EpisodeDownloadLabel, downloadFraction, downloadNetworkSpeed, downloadSpeed, downloadStatus, episodeDownloadPercent } from "../components/DownloadControls";
 import { ShowCoverCard, ShowCoverGrid } from "../components/ShowCoverGrid";
 import { useIOSCoverMenu, type DownloadAction } from "../components/IOSCoverMenu";
 import { useOfflineStatus } from "../components/useOfflineStatus";
 import { CacheDeleteDialog, CachePageFrame, cacheSize } from "../components/CachePageFrame";
-import { CompactAction, EmptyStatus } from "../components/ui";
+import { CompactAction, EmptyStatus, ErrorStatus, Img } from "../components/ui";
+import { useToastFeedback } from "../components/useToastFeedback";
 import { useStore } from "../store";
+import { AuthorCard } from "../components/AuthorCard";
+import { useOfflineAuthor } from "../components/useOfflineAuthor";
 
 const episodeButton = (cached: boolean) =>
   `relative inline-flex items-center justify-center overflow-hidden rounded-(--r-sm) text-xs font-semibold pressable ${cached ? "bg-primary/20 text-primary" : "bg-s3 text-on disabled:opacity-50"}`;
@@ -26,31 +29,40 @@ export default function Offline({ onBack, active, ...selection }: OfflineSelecti
   </CachePageFrame>;
 }
 
-export function OfflineLibrary({ id, title, episodes, active = true, wide = false, scroll }: OfflineSelection & {
+export function OfflineLibrary({ id, title, episodes, active = true, wide = false, scroll,
+  initialItems, initialShow, onPlayEpisode, onItemsChange, onDeleteEpisode }: OfflineSelection & {
   active?: boolean; wide?: boolean; scroll?: RefObject<HTMLDivElement | null>;
+  initialItems?: OfflineEpisode[]; initialShow?: OfflineShow;
+  onPlayEpisode?: (ep: number, items: OfflineEpisode[]) => void;
+  onItemsChange?: (items: OfflineEpisode[]) => void;
+  onDeleteEpisode?: (id: number, ep?: number) => Promise<void>;
 }) {
   const { history, push, deleteOffline } = useStore();
-  const { state, readError, refresh, busy, actionError: error, runAction: run } = useOfflineStatus(active);
-  const attemptedRefresh = useRef<number | undefined>(undefined);
+  // Own the menu target node: an ancestor scroll ref is not attached yet when
+  // this child's layout effects run with an already-warm status snapshot.
+  const content = useRef<HTMLDivElement>(null);
+  const { state, readError, refresh, busy, runAction: run } = useOfflineStatus(active);
   const [loadingShow, setLoadingShow] = useState<number>();
-  const [showErrors, setShowErrors] = useState<Record<number, string>>({});
   const [pendingDelete, setPendingDelete] = useState<{ id: number; ep?: number }>();
 
-  const refreshShow = async (videoId: number) => {
+  const refreshShow = (videoId: number) => {
     if (loadingShow !== undefined) return;
-    setLoadingShow(videoId);
-    setShowErrors((prev) => ({ ...prev, [videoId]: "" }));
-    try {
-      await api.offlineRefreshShow(videoId);
-      await refresh().catch(() => {});
-    } catch (e) {
-      setShowErrors((prev) => ({ ...prev, [videoId]: (e as Error).message || "剧集信息加载失败" }));
-    } finally {
-      setLoadingShow(undefined);
-    }
+    void run(async () => {
+      setLoadingShow(videoId);
+      try {
+        await api.offlineRefreshShow(videoId);
+      } catch (error) {
+        throw new Error((error as Error).message || "剧集信息加载失败");
+      } finally {
+        setLoadingShow(undefined);
+      }
+    });
   };
 
-  const items = state?.items || [];
+  const items = state?.items ?? initialItems ?? [];
+  useEffect(() => {
+    if (active && state) onItemsChange?.(state.items);
+  }, [active, state?.items, onItemsChange]);
   const jobs = new Map(state?.jobs.map((job) => [job.id, job]));
   const last = state?.last;
   const detailJob = id === undefined ? undefined : jobs.get(id);
@@ -65,22 +77,16 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
   for (const job of jobs.values()) {
     if (!groups.has(job.id)) groups.set(job.id, []);
   }
-  const needsShowInfo = id !== undefined && !!groups.get(id)?.length && !state?.shows?.[id];
-  useEffect(() => {
-    if (!active || id === undefined || !needsShowInfo || attemptedRefresh.current === id) return;
-    attemptedRefresh.current = id;
-    void refreshShow(id);
-  }, [active, id, needsShowInfo]);
-
   const saved = id === undefined ? [] : groups.get(id) || [];
-  const show = id === undefined ? undefined : state?.shows?.[id];
+  const show = id === undefined ? undefined : state?.shows?.[id] ?? initialShow;
+  const author = useOfflineAuthor(id, active && saved.length > 0 && initialShow === undefined, show?.author ?? initialShow?.author, refresh);
   const options = [...new Set(episodes || [])].sort((a, b) => a - b);
   const savedEpisodes = new Set(saved.map((item) => item.ep));
   const allEpisodes = [...new Set([...(show?.episodes ?? []), ...savedEpisodes])].sort((a, b) => a - b);
   const missingCount = allEpisodes.length - savedEpisodes.size;
   const cachedCount = options.filter((ep) => savedEpisodes.has(ep)).length;
   const canDeleteEpisode = id !== undefined && episodes === undefined && !busy && !detailActive && saved.length > 0;
-  useIOSCoverMenu(scroll, isIos && active && canDeleteEpisode && !pendingDelete, false, (action) => {
+  useIOSCoverMenu(content, isIos && active && canDeleteEpisode && !pendingDelete, false, (action) => {
     if (canDeleteEpisode && action.action === "delete-episode" && action.id === id && savedEpisodes.has(action.ep)) {
       setPendingDelete({ id, ep: action.ep });
     }
@@ -108,6 +114,10 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
   const manageCachedShow = (videoId: number) =>
     push({ kind: "offline", id: videoId, title: coverTitle(videoId) });
   const playCachedShow = (videoId: number, episode?: number) => {
+    if (videoId === id && episode !== undefined && onPlayEpisode) {
+      onPlayEpisode(episode, items);
+      return;
+    }
     const videoIds = [...groups].filter(([, group]) => group.length > 0).map(([showId]) => showId);
     const index = videoIds.indexOf(videoId);
     if (index < 0) return;
@@ -119,7 +129,7 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
       offlineCoverIds: videoIds.filter((showId) => state?.shows?.[showId]?.cover) });
   };
 
-  useIOSCoverMenu(scroll, isIos && active && id === undefined && groups.size > 0, false, ({ id: videoId, action }) => {
+  useIOSCoverMenu(content, isIos && active && id === undefined && groups.size > 0, false, ({ id: videoId, action }) => {
     if (action === "view-episodes" && groups.has(videoId)) {
       manageCachedShow(videoId);
       return;
@@ -167,7 +177,8 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
   const jobMessage = rawJobMessage === "后台下载已停止，点继续可接着下载"
     ? detailProgress ? "" : "下载已暂停"
     : rawJobMessage;
-  const cacheError = error || readError || (id !== undefined ? showErrors[id] : "");
+  const messageJob = detailJob || (!detailJob && last && (id === last.id || id === undefined && !jobs.has(last.id)) ? last : undefined);
+  useToastFeedback(jobMessage, active, messageJob ? `offline-job:${messageJob.id}:${messageJob.ep}:${messageJob.watch_key ?? ""}` : undefined);
   const selectingEpisodes = id !== undefined && episodes !== undefined;
   const cacheWholeShow = id !== undefined && episodes !== undefined && (
     <CompactDownloadButton
@@ -180,8 +191,18 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
   const cancelDelete = () => setPendingDelete(undefined);
 
   return (
-    <div className="space-y-2">
-      {(cacheSummary || selectingEpisodes || detailProgress || cacheError || jobMessage) && (
+    <div ref={content} className="space-y-2" data-hg-offline-show={id}>
+      {id !== undefined && episodes === undefined && (
+        <section aria-label="离线作品" className="hg-ios-content-card flex items-center gap-3 rounded-(--r-md) bg-s2 p-3">
+          {show?.cover && <div className="hg-ios-detail-cover relative aspect-[3/4] w-[64px] shrink-0 overflow-hidden rounded-(--r-sm) bg-s3">
+            <Img src={offlineCover(id)} raw eager />
+          </div>}
+          <h2 className="min-w-0 flex-1 text-sm font-semibold leading-snug text-on [overflow-wrap:anywhere]">
+            {title || saved[0]?.title || detailJob?.title || "离线剧集"}
+          </h2>
+        </section>
+      )}
+      {(cacheSummary || selectingEpisodes || detailProgress) && (
         <section aria-label="缓存信息" className={`flex flex-col gap-1 ${cacheCard}`}>
           {(cacheSummary || selectingEpisodes) && <div className="flex min-h-9 flex-wrap items-center justify-between gap-2 px-2 text-xs tabular-nums">
             <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1 whitespace-nowrap">
@@ -198,10 +219,9 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
             </div>}
           </div>}
           {detailProgress}
-          {cacheError && <p role="alert" className="px-2 py-1 text-xs text-danger">{cacheError}</p>}
-          {jobMessage && <p role="status" className="px-2 py-1 text-xs text-mut">{jobMessage}</p>}
         </section>
       )}
+      {readError && <ErrorStatus message="缓存读取失败" notify={false} onRetry={() => void refresh().catch(() => {})} />}
       {backgroundAction && (id === undefined || episodes === undefined && allEpisodes.length === 0) &&
         <section aria-label="缓存操作" className={cacheCard}>{backgroundAction}</section>}
       {id !== undefined && episodes !== undefined && <section className="space-y-2">
@@ -225,7 +245,7 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
           disabled={busy || detailActive} onCancel={cancelDelete} onDelete={() => {
             const target = pendingDelete;
             cancelDelete();
-            void run(() => deleteOffline(target.id, target.ep));
+            void run(() => (onDeleteEpisode ?? deleteOffline)(target.id, target.ep));
           }} />,
         overlayHost,
       )}
@@ -274,10 +294,12 @@ export function OfflineLibrary({ id, title, episodes, active = true, wide = fals
       )}
       {id !== undefined && episodes === undefined && allEpisodes.length > 0 && (
         <>
+          {author && <AuthorCard author={author}
+            onOpen={() => push({ kind: "author", id: author.id, name: author.name })} />}
           <section aria-label="缓存操作" className={cacheCard}>
             <div className={`hg-ios-cache-actions grid gap-[var(--ios-control-gap,8px)] ${isIos ? "grid-cols-3" : "grid-cols-[repeat(auto-fit,minmax(5rem,1fr))]"}`}>
               <button type="button" className={`${cacheAction} bg-s3 text-on`}
-                aria-busy={loadingShow === id} disabled={loadingShow !== undefined}
+                aria-busy={loadingShow === id} disabled={busy || loadingShow !== undefined}
                 onClick={() => void refreshShow(id)}>
                 {loadingShow === id ? <span aria-hidden="true" className="size-3.5 spinner" /> : <IRefresh size={14} aria-hidden="true" />}
                 刷新剧集

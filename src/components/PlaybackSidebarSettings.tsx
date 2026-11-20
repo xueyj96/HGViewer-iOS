@@ -127,7 +127,7 @@ export default function PlaybackSidebarSettings() {
                       event.preventDefault();
                       move(action, index + (event.key === "ArrowUp" ? -1 : 1));
                     }}>
-                    <IReorder size={17} strokeWidth={1.6} aria-hidden="true" />
+                    <IReorder size={17} aria-hidden="true" />
                   </button>
                 </li>
               );
