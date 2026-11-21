@@ -32,5 +32,7 @@ Release 中的 `unsigned.ipa` 不含开发者签名或设备描述文件，需�
 
 ## 开发文档
 
+- [版本日志](CHANGELOG.md)
+
 - [工程架构](ARCHITECTURE.md)
 - [iOS 播放设计](docs/ios-playback-design.md)
